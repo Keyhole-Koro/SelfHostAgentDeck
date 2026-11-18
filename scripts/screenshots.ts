@@ -83,6 +83,17 @@ writeFileSync(
     tool(90, "Edit", { file_path: join(repo, "src/todos.ts"), old_string: "  done: boolean;", new_string: "  done: boolean;\n  due?: Date;" }),
     tool(88, "Edit", { file_path: join(repo, "src/todos.ts"), old_string: todos.slice(8, 10).join("\n"), new_string: claudeTodos.slice(9, 11).join("\n") }),
     tool(84, "Write", { file_path: join(repo, "src/due.ts"), content: due.join("\n") + "\n" }),
+    { type: "last-prompt", sessionId: cs, lastPrompt: "Add optional due dates to todos and a helper for overdue ones" },
+    { ...tool(92, "TaskCreate", { subject: "Add due to Todo" }), message: { content: [{ type: "tool_use", id: "t1", name: "TaskCreate", input: { subject: "Add due to Todo" } }] } },
+    { type: "user", sessionId: cs, timestamp: at(92), message: { content: [{ type: "tool_result", tool_use_id: "t1", content: "ok" }] }, toolUseResult: { task: { id: "1" } } },
+    { ...tool(92, "TaskCreate", {}), message: { content: [{ type: "tool_use", id: "t2", name: "TaskCreate", input: { subject: "Write the overdue helper" } }] } },
+    { type: "user", sessionId: cs, timestamp: at(92), message: { content: [{ type: "tool_result", tool_use_id: "t2", content: "ok" }] }, toolUseResult: { task: { id: "2" } } },
+    { ...tool(92, "TaskCreate", {}), message: { content: [{ type: "tool_use", id: "t3", name: "TaskCreate", input: { subject: "Document the API change" } }] } },
+    { type: "user", sessionId: cs, timestamp: at(92), message: { content: [{ type: "tool_result", tool_use_id: "t3", content: "ok" }] }, toolUseResult: { task: { id: "3" } } },
+    { ...tool(83, "TaskUpdate", {}), message: { content: [{ type: "tool_use", id: "u1", name: "TaskUpdate", input: { taskId: "1", status: "completed" } }] } },
+    { ...tool(83, "TaskUpdate", {}), message: { content: [{ type: "tool_use", id: "u2", name: "TaskUpdate", input: { taskId: "2", status: "completed" } }] } },
+    { type: "assistant", sessionId: cs, timestamp: at(82), message: { content: [{ type: "text", text: "`Todo` has an optional `due` now, `createTodo` takes it, and `overdue()` in `src/due.ts` lists the late ones, oldest first.\n\nShall I add `due` to the API docs too?" }] } },
+    { type: "system", subtype: "away_summary", sessionId: cs, timestamp: at(80), content: "You asked for optional due dates and an overdue helper. Both are in; the API docs are the one task left." },
   ]
     .map((l) => JSON.stringify(l))
     .join("\n") + "\n",
@@ -116,7 +127,26 @@ hook("PostToolUse");
 // And a hand edit nobody's transcript explains.
 write("README.md", [...readme, "", "## Test", "", "    npm test"]);
 
-const child = spawn(process.execPath, [join(ROOT, "src", "cli.ts"), "view", "--port", "0"], { cwd: repo, env });
+// Both Claude sessions are still open: processes standing in for them, and Claude Code's records.
+const sessionsDir = join(home, ".claude", "sessions");
+mkdirSync(sessionsDir, { recursive: true });
+const standIns = [spawn("sleep", ["600"]), spawn("sleep", ["600"])];
+const [dueProc, rateProc] = standIns.map((p) => p.pid!);
+writeFileSync(join(sessionsDir, `${dueProc}.json`), JSON.stringify({ pid: dueProc, sessionId: cs, cwd: repo, name: "todo-api-4f", status: "idle", statusUpdatedAt: now - 6 * 6e4 }));
+const rs = "8c1d2e3f-4a5b-4c6d-8e7f-9a0b1c2d3e4f";
+writeFileSync(join(sessionsDir, `${rateProc}.json`), JSON.stringify({ pid: rateProc, sessionId: rs, cwd: repo, name: "todo-api-8c", status: "waiting", waitingFor: "approve Bash: npm install express-rate-limit", statusUpdatedAt: now - 2 * 6e4 }));
+writeFileSync(
+  join(claudeDir, `${rs}.jsonl`),
+  [
+    { type: "user", sessionId: rs, cwd: repo, timestamp: at(12), message: { content: "Rate-limit /todos to 100 requests a minute per client" } },
+    { type: "last-prompt", sessionId: rs, lastPrompt: "Rate-limit /todos to 100 requests a minute per client" },
+    { type: "ai-title", sessionId: rs, aiTitle: "Rate-limit the API" },
+  ]
+    .map((l) => JSON.stringify(l))
+    .join("\n") + "\n",
+);
+
+const child = spawn(process.execPath, [join(ROOT, "src", "cli.ts"), "view", "--port", "0", "--no-herdr"], { cwd: repo, env });
 const url = await new Promise<string>((resolve, reject) => {
   child.stdout.on("data", (d: Buffer) => {
     const m = /http:\S+/.exec(String(d));
@@ -129,18 +159,20 @@ mkdirSync(OUT, { recursive: true });
 const browser = await chromium.launch();
 try {
   for (const [name, width, height, scheme] of [
-    ["viewer", 1280, 800, "light"],
-    ["viewer-dark", 1280, 800, "dark"],
+    ["viewer", 1280, 900, "light"],
+    ["viewer-dark", 1280, 900, "dark"],
   ] as const) {
     const page = await browser.newPage({ viewport: { width, height }, colorScheme: scheme, deviceScaleFactor: 2 });
-    await page.goto(url);
+    await page.goto(`${url}&s=claude:${cs}`);
     await page.waitForSelector(".session");
+    await page.waitForSelector(".file");
     await page.screenshot({ path: join(OUT, `${name}.png`) });
     console.log(`docs/screenshots/${name}.png`);
   }
 } finally {
   await browser.close();
   child.kill();
+  for (const p of standIns) p.kill();
   rmSync(home, { recursive: true, force: true });
   rmSync(join(repo, ".."), { recursive: true, force: true });
 }

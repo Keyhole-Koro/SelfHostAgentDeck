@@ -20,15 +20,17 @@ Node 22.18 or later.
 ```bash
 npm i -g agent-diff-viewer
 agent-diff install        # optional: hooks + a skill for Claude Code and Codex
+agent-diff install --statusline   # also: the sessions waiting on you, in Claude Code's status line
 ```
 
 `install` adds:
 
 - a PreToolUse/PostToolUse hook to `~/.claude/settings.json` and `~/.codex/hooks.json`;
-- the `agent-diff-commit` skill to `~/.claude/skills` and `~/.agents/skills`.
+- the `agent-diff-commit` skill to `~/.claude/skills` and `~/.agents/skills`;
+- with `--statusline`, Claude Code's `statusLine`, unless you already have one.
 
 It leaves your other hooks alone and keeps a `.bak-agent-diff` backup. In Codex, run `/hooks` once
-and trust the hook. `agent-diff uninstall` removes both.
+and trust the hook. `agent-diff uninstall` removes all of it.
 
 ## Viewer
 
@@ -37,8 +39,14 @@ agent-diff view                 # prints a http://127.0.0.1:… URL to open
 agent-diff view --since today   # start with a wider range
 ```
 
-Sessions are listed on the left, newest first. On the right are the hunks the selected session
-made, each with how sure the attribution is. The buttons at the top choose the range:
+The left side groups the sessions by project: a repository together with its worktrees. Projects
+with a session waiting on you come first. Within a project the sessions are sorted by what they
+need from you (see [Waiting on you](#waiting-on-you)), then come the sessions that ended but left
+changes in this repository; idle ones are folded away. Picking one shows, on the right, what it is
+waiting for or its last reply, and below that the hunks it made in its working tree, each with
+how sure the attribution is. `agent-diff
+inbox --view` is the same page started anywhere: it then shows the changes of running sessions
+only. The buttons above the changes choose the range:
 
 | Range | Shows |
 |---|---|
@@ -52,6 +60,109 @@ shared with other sessions.
 
 The server listens on 127.0.0.1 only. Every request needs the random token in the printed URL,
 so other web pages can't read your diffs. Nothing leaves your machine.
+
+## Waiting on you
+
+```bash
+agent-diff inbox                   # in the terminal, from any directory
+agent-diff inbox --view            # as a web page that refreshes every 5 seconds
+agent-diff inbox --watch --notify  # a desktop notification when a session starts waiting
+```
+
+With many sessions open, the hard part is knowing which ones are blocked on you. The inbox lists
+every running Claude Code and Codex session, in every repository, sorted by what it needs:
+
+| Section | Means |
+|---|---|
+| Needs an answer | A permission (`approve Bash: npm test`), an AskUserQuestion (with its options), a background session blocked on you (with what it needs), or a Codex command that may wait for approval |
+| Your turn | The session finished its turn: its recap and last reply are shown, marked "?" when the reply ends with a question |
+| Working | Running a turn, or waiting for a background command it started |
+| Idle for over 1 day | Your turn, but untouched for a day (`--stale 4h` to change it). Folded away |
+
+For each session it also shows, when the transcript says so:
+
+- **its title** (what it works on) and **your last prompt**, so you know which session it is;
+- **"While you were away"**: the recap Claude Code writes after a turn, until you prompt again;
+- **its task list** (`3/7`), **background commands** still running (and for how long), and
+  **pull requests** it opened, with their CI and review state (looked up with `gh`). Agents keep
+  a task list on their own only for bigger jobs; to see progress more often, add to your
+  `CLAUDE.md`: *"For work with more than two steps, keep a task list (TaskCreate / TaskUpdate)
+  and update it as you go."*
+- **its context**: tokens in use, against the model's window (Codex) or the point where it last
+  compacted (Claude Code), so you see which session will compact soon;
+- **shared files**: files another running session also has uncommitted changes in;
+- for Codex, how much of the 5-hour and weekly limits is used.
+
+Done with one for now? **Later** takes it off the list for an hour, until tomorrow, or
+`--until 9:00`; **Done** until it does something new. Both come back by themselves as soon as the
+session moves on.
+
+```bash
+agent-diff later 4f2a9c1e --until tomorrow
+agent-diff done 4f2a9c1e
+agent-diff unhold 4f2a9c1e
+```
+
+### Answering from the page (herdr)
+
+When a session runs in a [herdr](https://herdr.dev) pane, the page can act on it, on your click:
+**Go to its pane**, **send it a prompt**, and, when it asks something, **show its screen** and
+send the key that answers (`1`, `2`, `↑`, `Enter`, `Esc`, `y`, `n` …). herdr also sees Codex's
+approval prompts, which Codex itself does not log. Nothing is sent without a click; `--no-herdr`
+turns this off.
+
+In the changes view, **Comment** on any hunk; the comments go to the session as one review
+request (through herdr), or to the clipboard to paste.
+
+### In Claude Code's status line
+
+```bash
+agent-diff install --statusline
+```
+
+shows the other sessions waiting on you under the prompt of the one you are in:
+`⏳ 1 needs an answer (Shop checkout: approve Bash: terraform apply) · 2 your turn`. A status
+line you already have is left alone; add `agent-diff statusline` to it yourself.
+
+### Before editing a file another session changed
+
+With the hooks installed, when Claude Code is about to edit a file that another running session
+has uncommitted changes in, the hook tells it so (once per new change of the other session), so
+it keeps their edits and stages only its own.
+
+### Cleaning up
+
+```bash
+agent-diff cleanup
+```
+
+lists sessions left idle (with the memory each holds) and worktrees nobody uses any more
+(merged or with their remote branch deleted, clean, no session in them), with the commands to
+close or remove them. It runs none of them. The page has the same under **Clean up**.
+
+### On your phone
+
+```bash
+agent-diff inbox --publish            # once
+agent-diff inbox --watch --publish    # again on every change, at most every 30 seconds
+```
+
+publishes a snapshot of the inbox with [SelfHostArtifacts](https://github.com/Keyhole-Koro/SelfHostArtifacts)'
+`artifact` CLI to your own deployment: a private page (only you and the viewers you allow) that
+reloads itself every minute. It includes the end of each session's last reply.
+
+### Where it looks
+
+- **Claude Code** writes a record per running process to `~/.claude/sessions/<pid>.json`,
+  including whether it waits and for what, and one per background session to
+  `~/.claude/jobs/<id>/state.json`. These files are Claude Code's own and undocumented, so a new
+  Claude Code version may change them. Transcripts are read incrementally: the first look reads
+  the last 2 MB, later looks only what was appended.
+- **Codex** holds `~/.codex/thread-writer-locks/<thread>.lock` while a thread is open; its rollout
+  says whether the turn finished, the context and the rate limits. Codex does not log approval
+  prompts: a command that has run for 30 seconds without output is shown as possibly waiting for
+  one, and herdr, when used, tells for sure.
+- Holds are kept in `$XDG_STATE_HOME/agent-diff/holds.json` (`~/.local/state/agent-diff`).
 
 ## Terminal
 
@@ -78,6 +189,10 @@ $ git commit
 | `agent-diff show <session>` | The hunks a session made, as a diff |
 | `agent-diff add <session>` | Stage the session's changes (`--dry-run` to preview) |
 | `agent-diff view` | The viewer (`--port` to fix the port) |
+| `agent-diff inbox` | Running sessions that wait on you, in every repository (`--view`, `--all`, `--stale <time>`, `--watch`, `--notify`, `--publish`) |
+| `agent-diff later` / `done` / `unhold` `<session>` | Take a session off the list for a while, or until it moves on |
+| `agent-diff cleanup` | Idle sessions and unused worktrees, with the commands to close or remove them |
+| `agent-diff statusline` | One line for Claude Code's status line (`install --statusline` sets it up) |
 | `agent-diff install` / `uninstall` | Hooks and skill for Claude Code and Codex (`--agent claude\|codex` for one) |
 
 | Option | |
@@ -120,6 +235,8 @@ repository. One record is the before and after content of a tool call, stored as
 ```bash
 npm ci
 npm test               # node:test, against temporary repositories and fake transcripts
+                       # (the page's test runs in Chromium: npx playwright install chromium;
+                       # it is skipped without it. AGENT_DIFF_UI_SHOTS=<dir> saves screenshots)
 npm run typecheck
 npm run screenshots    # rebuilds docs/screenshots from a demo repository (Playwright)
 ```
