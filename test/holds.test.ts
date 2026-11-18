@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { beforeEach, describe, it } from "node:test";
 import { applyHolds, hold, parseUntil, readHolds, release } from "../src/holds.ts";
 import type { Inbox, InboxItem } from "../src/inbox.ts";
+import { newlyWaiting } from "../src/notify.ts";
 
 const NOW = Date.parse("2026-11-19T10:00:00");
 
@@ -65,5 +66,27 @@ describe("holds", () => {
     assert.equal(parseUntil("9:00", NOW), Date.parse("2026-11-20T09:00:00"), "a time already past today means tomorrow");
     assert.equal(parseUntil("2026-12-01 08:00", NOW), Date.parse("2026-12-01 08:00"));
     assert.throws(() => parseUntil("someday", NOW), /Cannot read/);
+  });
+});
+
+describe("notifications", () => {
+  it("reports sessions that start waiting, once", () => {
+    const first = inbox(item("claude:a", "working"), item("claude:b", "your-turn"));
+    assert.deepEqual(newlyWaiting(undefined, first), [], "nothing on the first look");
+    const second = inbox(item("claude:a", "needs-answer", NOW, { reason: "approve Bash: rm -rf dist", title: "Clean build" }), item("claude:b", "your-turn"));
+    assert.deepEqual(newlyWaiting(first, second), [{ key: "claude:a", title: "Clean build needs an answer", body: "approve Bash: rm -rf dist" }]);
+    assert.deepEqual(newlyWaiting(second, second), []);
+  });
+
+  it("reports a turn that ended again, even if the working phase was missed", () => {
+    const a = inbox(item("claude:a", "your-turn", NOW - 5000, { lastMessage: "one" }));
+    const b = inbox(item("claude:a", "your-turn", NOW, { lastMessage: "Done.\n\nShall I push?" }));
+    assert.deepEqual(newlyWaiting(a, b), [{ key: "claude:a", title: "a: your turn", body: "Shall I push?" }]);
+  });
+
+  it("stays quiet about held sessions", () => {
+    const a = inbox(item("claude:a", "working"));
+    const b = inbox(item("claude:a", "your-turn", NOW, { hold: { kind: "done" } }));
+    assert.deepEqual(newlyWaiting(a, b), []);
   });
 });
