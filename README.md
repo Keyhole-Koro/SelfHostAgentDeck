@@ -198,6 +198,36 @@ The keys, the passkeys' public keys and the log are in `$XDG_STATE_HOME/agent-di
 readable by you only. The local page keeps its token across restarts, so its URL can be
 bookmarked when it runs as a service.
 
+To keep both running, make them user services. Give node an explicit heap size: the first look at
+who changed what reads a month of transcripts, briefly about a GB of heap, and under a memory cap
+node picks a heap too small for that and crashes. The worker that holds them lets go after ten
+idle minutes.
+
+```ini
+# ~/.config/systemd/user/agent-diff.service   (ExecStart: the path `which agent-diff` prints)
+[Service]
+Environment=NODE_OPTIONS=--max-old-space-size=2048
+ExecStart=%h/.npm-global/bin/agent-diff inbox --view --port 47300 --remote https://agents.example.com
+Restart=on-failure
+MemoryMax=3G
+
+[Install]
+WantedBy=default.target
+
+# ~/.config/systemd/user/agent-diff-tunnel.service
+[Service]
+Type=notify
+ExecStart=/usr/bin/cloudflared --no-autoupdate tunnel --config %h/.cloudflared/agent-diff.yml run
+Restart=on-failure
+
+[Install]
+WantedBy=default.target
+```
+
+```bash
+systemctl --user enable --now agent-diff.service agent-diff-tunnel.service
+```
+
 ### Where it looks
 
 - **Claude Code** writes a record per running process to `~/.claude/sessions/<pid>.json`,
