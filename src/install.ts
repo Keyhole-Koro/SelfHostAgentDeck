@@ -103,6 +103,47 @@ export function agentInstalled(agent: Agent): boolean {
   return onPath(agent === "claude" ? "claude" : "codex") || existsSync(dirname(settingsFile(agent)));
 }
 
+// ---------------------------------------------------------------- status line
+
+const STATUS_MARKER = "agent-diff-statusline";
+
+/** How Claude Code should run the status line: the installed bin, else node + this checkout. */
+function statusCommand(): string {
+  if (onPath(STATUS_MARKER)) return STATUS_MARKER;
+  const here = fileURLToPath(import.meta.url);
+  const entry = join(dirname(here), `statusline-entry${here.endsWith(".ts") ? ".ts" : ".js"}`);
+  return `"${process.execPath}" "${entry}" # ${STATUS_MARKER}`;
+}
+
+type StatusLine = { type?: string; command?: string; padding?: number };
+
+/**
+ * Sets Claude Code's status line to show the other sessions waiting on you. A status line someone
+ * else set up is left alone: `skipped` then says what it runs.
+ */
+export function installStatusLine(): { file: string; changed: boolean; skipped?: string } {
+  const file = settingsFile("claude");
+  const settings = readSettings(file);
+  const current = settings["statusLine"] as StatusLine | undefined;
+  if (current && !current.command?.includes(STATUS_MARKER)) return { file, changed: false, skipped: current.command ?? "another status line" };
+  const want: StatusLine = { type: "command", command: statusCommand(), padding: 0 };
+  if (JSON.stringify(current) === JSON.stringify(want)) return { file, changed: false };
+  settings["statusLine"] = want;
+  writeSettings(file, settings);
+  return { file, changed: true };
+}
+
+export function uninstallStatusLine(): { file: string; changed: boolean } {
+  const file = settingsFile("claude");
+  if (!existsSync(file)) return { file, changed: false };
+  const settings = readSettings(file);
+  const current = settings["statusLine"] as StatusLine | undefined;
+  if (!current?.command?.includes(STATUS_MARKER)) return { file, changed: false };
+  delete settings["statusLine"];
+  writeSettings(file, settings);
+  return { file, changed: true };
+}
+
 /** Marks a skill folder as ours, so only our own copies are replaced or removed. */
 const SKILL_MARKER = ".installed-by-agent-diff";
 const SKILLS = join(dirname(fileURLToPath(import.meta.url)), "..", "skills");

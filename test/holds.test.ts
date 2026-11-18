@@ -6,6 +6,7 @@ import { beforeEach, describe, it } from "node:test";
 import { applyHolds, hold, parseUntil, readHolds, release } from "../src/holds.ts";
 import type { Inbox, InboxItem } from "../src/inbox.ts";
 import { newlyWaiting } from "../src/notify.ts";
+import { statusLine } from "../src/statusline.ts";
 
 const NOW = Date.parse("2026-11-19T10:00:00");
 
@@ -88,5 +89,25 @@ describe("notifications", () => {
     const a = inbox(item("claude:a", "working"));
     const b = inbox(item("claude:a", "your-turn", NOW, { hold: { kind: "done" } }));
     assert.deepEqual(newlyWaiting(a, b), []);
+  });
+});
+
+describe("status line", () => {
+  it("names what the other sessions wait for, leaving out this one and held ones", () => {
+    const line = statusLine(
+      inbox(
+        item("claude:me", "needs-answer", NOW, { reason: "input needed" }),
+        item("claude:a", "needs-answer", NOW, { reason: "approve Bash: terraform apply -target=module.db", title: "Shop checkout" }),
+        item("claude:b", "your-turn"),
+        item("claude:c", "your-turn", NOW, { hold: { kind: "done" } }),
+        item("claude:d", "working"),
+      ),
+      "me",
+    );
+    assert.equal(line, "⏳ 1 needs an answer (Shop checkout: approve Bash: terraform apply -target=m…) · 1 your turn");
+  });
+
+  it("is empty when nothing waits", () => {
+    assert.equal(statusLine(inbox(item("claude:a", "working"), item("claude:b", "stale"))), "");
   });
 });
