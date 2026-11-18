@@ -97,35 +97,61 @@ function placeOf(cwd: string | undefined): Place {
 
 type Ask = ViewRequest extends infer R ? (R extends { id: number } ? Omit<R, "id"> : never) : never;
 
-/** The attribution worker, started on first use; calls resolve with its answer. */
-function attributionWorker(): (req: Ask) => Promise<unknown> {
+/** How long the attribution worker may sit unused before it stops. */
+const WORKER_IDLE_MS = 10 * 60_000;
+
+/**
+ * The attribution worker, started on first use; calls resolve with its answer. It keeps every
+ * transcript it has parsed (about a GB over a month), which a page left running all day should
+ * not hold for nothing: after `idleMs` without a call it stops, and the next call starts a fresh
+ * one, slow again for that first look.
+ */
+export function attributionWorker(idleMs = WORKER_IDLE_MS): ((req: Ask) => Promise<unknown>) & { running(): boolean } {
   const here = import.meta.url;
   let worker: Worker | undefined;
+  let idle: NodeJS.Timeout | undefined;
   let next = 0;
   const waiting = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }>();
-  const start = () => {
-    worker = new Worker(new URL(`./view-worker${here.endsWith(".ts") ? ".ts" : ".js"}`, here));
-    worker.unref();
-    worker.on("message", (m: { id: number; ok?: unknown; error?: string }) => {
-      const w = waiting.get(m.id);
-      waiting.delete(m.id);
-      if (m.error !== undefined) w?.reject(new Error(m.error));
-      else w?.resolve(m.ok);
-    });
-    worker.on("error", (e) => {
-      for (const w of waiting.values()) w.reject(e);
-      waiting.clear();
-      worker = undefined; // start a new one next time
-    });
+  const stopIfIdle = () => {
+    if (!worker || waiting.size > 0) return;
+    const w = worker;
+    worker = undefined; // first, so its exit below is not taken for a crash
+    void w.terminate();
   };
-  return (req) => {
-    if (!worker) start();
+  const start = (): Worker => {
+    const w = new Worker(new URL(`./view-worker${here.endsWith(".ts") ? ".ts" : ".js"}`, here));
+    w.unref();
+    w.on("message", (m: { id: number; ok?: unknown; error?: string }) => {
+      const p = waiting.get(m.id);
+      waiting.delete(m.id);
+      if (m.error !== undefined) p?.reject(new Error(m.error));
+      else p?.resolve(m.ok);
+      if (waiting.size === 0) {
+        clearTimeout(idle);
+        idle = setTimeout(stopIfIdle, idleMs).unref();
+      }
+    });
+    // A crash fails what it was doing; the next call starts a new one.
+    const lost = (e: Error) => {
+      if (worker !== w) return;
+      worker = undefined;
+      for (const p of waiting.values()) p.reject(e);
+      waiting.clear();
+    };
+    w.on("error", lost);
+    w.on("exit", (code) => lost(new Error(`The attribution worker exited (${code}).`)));
+    return w;
+  };
+  const ask = (req: Ask): Promise<unknown> => {
+    clearTimeout(idle);
+    worker ??= start();
     const id = ++next;
     return new Promise((resolve, reject) => {
       waiting.set(id, { resolve, reject });
       worker!.postMessage({ ...req, id });
     });
   };
+  return Object.assign(ask, { running: () => worker !== undefined });
 }
 
 function rangeOf(url: URL): { base?: string; since?: number } {
@@ -201,7 +227,8 @@ function listen(server: Server, port: number): Promise<number> {
 export async function serve(opts: ServeOptions): Promise<Served> {
   const token = localToken();
   const attribution = attributionWorker();
-  // Read the month of transcripts now, so the first look at a session's changes is quick.
+  // Read the month of transcripts now, so the first look at a session's changes is quick. If
+  // nobody looks for a while, the worker lets them go.
   void attribution({ op: "warm", days: opts.days }).catch(() => {});
   const cfg: RemoteConfig | undefined = opts.remote ? remoteConfig(opts.remote.origin) : undefined;
   if (cfg) saveOrigin(cfg.origin);
