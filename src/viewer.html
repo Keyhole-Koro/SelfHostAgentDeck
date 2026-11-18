@@ -11,6 +11,7 @@
   --add-bg: #e9f6ec; --add-text: #1d5c2e; --del-bg: #fbecec; --del-text: #8a2424;
   --hunk: #6f6a62; --claude: #b45a2c; --codex: #2d6a8f;
   --recorded: #1d5c2e; --sure: #2d6a8f; --likely: #8a6a12; --maybe: #8a2424;
+  --urgent: #b42318; --urgent-soft: #fdeceb; --warn: #8a6a12; --warn-soft: #fbf3dc; --ok: #1d5c2e;
   --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   color-scheme: light;
 }
@@ -21,39 +22,128 @@
     --add-bg: #1d3324; --add-text: #9fdcae; --del-bg: #3a2222; --del-text: #f0a5a5;
     --hunk: #9c968c; --claude: #e39a72; --codex: #7fb8dc;
     --recorded: #9fdcae; --sure: #7fb8dc; --likely: #e3c56f; --maybe: #f0a5a5;
+    --urgent: #ff9b8f; --urgent-soft: #3d2220; --warn: #e3c56f; --warn-soft: #3a3220; --ok: #9fdcae;
     color-scheme: dark;
   }
 }
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
-button, input { font: inherit; color: inherit; }
-header { position: sticky; top: 0; z-index: 2; background: var(--bg); border-bottom: 1px solid var(--line); padding: 12px 20px; display: flex; flex-wrap: wrap; gap: 12px 20px; align-items: center; }
-header h1 { margin: 0; font-size: 16px; font-weight: 600; }
-header .root { color: var(--muted); font-size: 13px; font-family: var(--mono); }
-.ranges { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-left: auto; }
-.ranges button { border: 1px solid var(--line); background: var(--panel); border-radius: 6px; padding: 3px 10px; cursor: pointer; font-size: 13px; }
-.ranges button[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
-.ranges input { border: 1px solid var(--line); background: var(--panel); border-radius: 6px; padding: 3px 8px; width: 170px; font-size: 13px; }
-.layout { display: grid; grid-template-columns: 320px minmax(0, 1fr); min-height: calc(100vh - 57px); }
-nav { border-right: 1px solid var(--line); padding: 12px 0; overflow-y: auto; max-height: calc(100vh - 57px); position: sticky; top: 57px; }
-nav .count { padding: 0 20px 8px; color: var(--muted); font-size: 13px; }
-.session { display: block; width: 100%; text-align: left; border: 0; background: none; padding: 10px 20px; cursor: pointer; border-left: 3px solid transparent; }
+button, input, textarea { font: inherit; color: inherit; }
+header { position: sticky; top: 0; z-index: 2; min-height: 49px; background: var(--bg); border-bottom: 1px solid var(--line); padding: 6px 20px; display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: center; }
+header h1 { margin: 0; font-size: 16px; font-weight: 600; white-space: nowrap; }
+.summary { color: var(--muted); font-size: 13px; display: flex; flex-wrap: wrap; gap: 4px 12px; }
+.summary b { color: var(--text); font-weight: 600; }
+.summary .urgent b { color: var(--urgent); }
+.tools { margin-left: auto; display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; font-size: 12px; color: var(--muted); }
+.limits.high { color: var(--warn); font-weight: 600; }
+.tbtn { border: 1px solid var(--line); background: var(--panel); border-radius: 6px; padding: 2px 9px; cursor: pointer; font-size: 13px; }
+.tbtn[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+
+.layout { display: grid; grid-template-columns: 340px minmax(0, 1fr); }
+nav { border-right: 1px solid var(--line); padding: 6px 0 16px; overflow-y: auto; height: calc(100vh - 49px); position: sticky; top: 49px; }
+.project { display: flex; align-items: center; gap: 8px; width: 100%; border: 0; background: none; cursor: pointer; text-align: left; padding: 14px 20px 6px; font-size: 14px; font-weight: 600; }
+.project:not(:first-child) { border-top: 1px solid var(--line); margin-top: 8px; }
+.project .chev { flex: none; width: 10px; color: var(--muted); font-size: 10px; }
+.project:hover .chev { color: var(--text); }
+.project .pname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.counts { margin-left: auto; display: flex; gap: 4px; align-items: center; }
+.c { font-size: 11px; font-weight: 600; min-width: 18px; text-align: center; border-radius: 9px; padding: 0 5px; line-height: 17px; }
+.c.needs-answer { background: var(--urgent); color: var(--bg); }
+.c.your-turn { background: var(--accent-soft); color: var(--accent); }
+.c.other { color: var(--muted); font-weight: 400; padding: 0; }
+.fold { display: block; width: 100%; border: 0; background: none; cursor: pointer; text-align: left; padding: 4px 20px 4px 36px; font-size: 12px; color: var(--muted); }
+.fold:hover { color: var(--text); }
+.session { display: block; width: 100%; text-align: left; border: 0; background: none; padding: 7px 20px 7px 17px; cursor: pointer; border-left: 3px solid transparent; }
 .session:hover { background: var(--selected); }
 .session[aria-current="true"] { background: var(--selected); border-left-color: var(--accent); }
-.session .top { display: flex; gap: 8px; align-items: baseline; font-size: 13px; color: var(--muted); }
-.session .title { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; margin-top: 2px; }
+.session:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.row1 { display: flex; gap: 6px; align-items: center; }
+.row1 .name { font-weight: 600; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.row1 .age { margin-left: auto; color: var(--muted); font-size: 12px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.row2 { display: flex; gap: 6px; font-size: 13px; color: var(--muted); padding-left: 16px; min-width: 0; }
+.row2 .where { white-space: nowrap; }
+.row2 .agent { flex: none; }
+.row2 .snip { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.dot { flex: none; width: 8px; height: 8px; border-radius: 50%; border: 1.5px solid var(--muted); }
+.dot.needs-answer { background: var(--urgent); border-color: var(--urgent); }
+.dot.your-turn { background: var(--accent); border-color: var(--accent); }
+.dot.working { border-style: dashed; animation: spin 2.4s linear infinite; }
+.dot.closed { border-color: var(--line); }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .dot.working { animation: none; } }
+.chip { flex: none; font-size: 11px; font-weight: 600; border: 1px solid currentColor; border-radius: 9px; padding: 0 5px; line-height: 15px; color: var(--muted); }
+.chip.ask, .chip.failing, .chip.conflict { color: var(--urgent); }
+.chip.pending, .chip.ctx { color: var(--warn); }
+.chip.passing { color: var(--ok); }
 .agent { font-weight: 600; font-size: 12px; }
 .agent.claude { color: var(--claude); }
 .agent.codex { color: var(--codex); }
 .id { font-family: var(--mono); font-size: 12px; }
-main { padding: 24px 32px 64px; min-width: 0; }
-.head h2 { margin: 0 0 4px; font-size: 20px; font-weight: 600; }
+.nav-empty { color: var(--muted); font-size: 13px; padding: 12px 20px; }
+.keys { color: var(--muted); font-size: 12px; padding: 20px 20px 0; }
+kbd { font-family: var(--mono); font-size: 11px; border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; }
+
+main { padding: 24px 32px 64px; min-width: 0; max-width: 1100px; }
+.head h2 { margin: 0 0 4px; font-size: 20px; font-weight: 600; display: flex; flex-wrap: wrap; align-items: center; gap: 10px; overflow-wrap: anywhere; }
+.pill { font-size: 12px; font-weight: 600; border-radius: 10px; padding: 1px 9px; background: var(--selected); color: var(--muted); white-space: nowrap; }
+.pill.needs-answer { background: var(--urgent-soft); color: var(--urgent); }
+.pill.your-turn { background: var(--accent-soft); color: var(--accent); }
 .meta { color: var(--muted); font-size: 13px; display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: center; }
-.actions { margin: 16px 0 24px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-.btn { border: 1px solid var(--line); background: var(--panel); border-radius: 6px; padding: 5px 12px; cursor: pointer; }
+.meta .path { font-family: var(--mono); font-size: 12px; overflow-wrap: anywhere; }
+.actions { margin: 14px 0 0; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.block { margin-top: 20px; }
+.label { font-size: 12px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); margin-bottom: 6px; }
+.wait { border: 1px solid var(--urgent); border-radius: 8px; background: var(--panel); padding: 12px 16px; box-shadow: inset 3px 0 0 var(--urgent); }
+.reason { display: inline-block; padding: 2px 8px; border-radius: 6px; background: var(--urgent-soft); color: var(--urgent); font-family: var(--mono); font-size: 13px; overflow-wrap: anywhere; }
+.q { margin-top: 10px; }
+.opts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.opts span { border: 1px solid var(--line); border-radius: 12px; padding: 0 10px; font-size: 13px; }
+.box { border: 1px solid var(--line); border-radius: 8px; background: var(--panel); padding: 12px 16px; }
+.reply { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 14px; max-height: 45vh; overflow-y: auto; }
+.reply code, .summary-text code { font-family: var(--mono); font-size: 12.5px; background: var(--selected); padding: 0 4px; border-radius: 3px; }
+.reply b { font-weight: 600; }
+.asked { color: var(--muted); font-size: 14px; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 7.5em; overflow: hidden; }
+.screen { margin: 10px 0 0; padding: 10px 12px; background: var(--selected); border-radius: 6px; font-family: var(--mono); font-size: 12.5px; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 40vh; overflow-y: auto; }
+.keypad { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.keypad button { min-width: 36px; }
+textarea.prompt { width: 100%; min-height: 84px; resize: vertical; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); padding: 8px 10px; }
+.note { color: var(--muted); font-size: 14px; padding: 8px 0; }
+.note:empty { display: none; }
+.sub { color: var(--muted); font-size: 12px; }
+.note.ok { color: var(--ok); }
+.btn { border: 1px solid var(--line); background: var(--panel); border-radius: 6px; padding: 4px 12px; cursor: pointer; font-size: 14px; }
 .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--bg); }
-code.cmd { font-family: var(--mono); font-size: 13px; background: var(--selected); padding: 2px 6px; border-radius: 4px; }
-.plan { border: 1px solid var(--line); background: var(--panel); border-radius: 8px; padding: 12px 16px; margin-bottom: 24px; font-size: 14px; }
+.btn.small { padding: 1px 8px; font-size: 12px; }
+code.cmd { font-family: var(--mono); font-size: 13px; background: var(--selected); padding: 2px 6px; border-radius: 4px; overflow-wrap: anywhere; }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
+.tasks { list-style: none; margin: 0; padding: 0; font-size: 14px; }
+.tasks li { display: flex; gap: 8px; padding: 2px 0; }
+.tasks .mark { flex: none; width: 1.2em; text-align: center; color: var(--muted); }
+.tasks .completed { color: var(--muted); text-decoration: line-through; }
+.tasks .in_progress .mark { color: var(--accent); }
+.bar { height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; margin: 4px 0 8px; }
+.bar > span { display: block; height: 100%; background: var(--accent); }
+.bar.warn > span { background: var(--warn); }
+.bar.full > span { background: var(--urgent); }
+.list { list-style: none; margin: 0; padding: 0; font-size: 14px; }
+.list li { padding: 3px 0; overflow-wrap: anywhere; }
+.list .sub { color: var(--muted); font-size: 12px; }
+.ci-failing { color: var(--urgent); } .ci-pending { color: var(--warn); } .ci-passing { color: var(--ok); }
+.warnbox { border: 1px solid var(--warn); background: var(--warn-soft); border-radius: 8px; padding: 10px 14px; font-size: 14px; }
+.linkish { border: 0; background: none; padding: 0; color: var(--accent); cursor: pointer; text-decoration: underline; font-size: inherit; }
+
+.changes { margin-top: 32px; border-top: 1px solid var(--line); padding-top: 20px; }
+.changes-head { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; margin-bottom: 14px; }
+.changes-head h3 { margin: 0; font-size: 16px; font-weight: 600; }
+.changes-head .sub { color: var(--muted); font-size: 13px; }
+.ranges { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-left: auto; }
+.ranges button { border: 1px solid var(--line); background: var(--panel); border-radius: 6px; padding: 2px 9px; cursor: pointer; font-size: 13px; }
+.ranges button[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+.ranges input { border: 1px solid var(--line); background: var(--panel); border-radius: 6px; padding: 2px 8px; width: 160px; font-size: 13px; }
+.stage-row { margin: 0 0 16px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.review { border: 1px solid var(--accent); background: var(--accent-soft); border-radius: 8px; padding: 10px 14px; margin-bottom: 16px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-size: 14px; }
+.plan { border: 1px solid var(--line); background: var(--panel); border-radius: 8px; padding: 12px 16px; margin-bottom: 16px; font-size: 14px; }
 .plan ul { margin: 6px 0 12px; padding-left: 18px; font-family: var(--mono); font-size: 13px; }
 .file { border: 1px solid var(--line); border-radius: 8px; background: var(--panel); margin-bottom: 16px; overflow: hidden; }
 .file > summary { list-style: none; cursor: pointer; padding: 8px 14px; display: flex; gap: 10px; align-items: baseline; border-bottom: 1px solid var(--line); }
@@ -65,62 +155,94 @@ code.cmd { font-family: var(--mono); font-size: 13px; background: var(--selected
 .st.A { color: var(--add-text); } .st.D { color: var(--del-text); } .st.M, .st.R { color: var(--likely); }
 .diff { overflow-x: auto; font-family: var(--mono); font-size: 12.5px; line-height: 1.55; }
 .hunk-head { display: flex; gap: 10px; align-items: center; padding: 4px 14px; color: var(--hunk); background: var(--selected); white-space: pre; }
+.hunk-head .comment-btn { margin-left: auto; font-family: system-ui, sans-serif; }
 .badge { font-family: system-ui, sans-serif; font-size: 11px; border: 1px solid currentColor; border-radius: 10px; padding: 0 7px; }
 .badge.recorded { color: var(--recorded); } .badge.sure { color: var(--sure); } .badge.likely { color: var(--likely); } .badge.maybe { color: var(--maybe); }
 .l { white-space: pre; padding: 0 14px; min-width: max-content; }
 .l.add { background: var(--add-bg); color: var(--add-text); }
 .l.del { background: var(--del-bg); color: var(--del-text); }
+.comment { font-family: system-ui, sans-serif; font-size: 14px; padding: 8px 14px; border-top: 1px dashed var(--line); background: var(--accent-soft); display: flex; gap: 8px; align-items: flex-start; white-space: pre-wrap; }
+.comment textarea { flex: 1; min-height: 56px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); padding: 6px 8px; }
+.comment .text { flex: 1; overflow-wrap: anywhere; }
 .more { padding: 4px 14px; color: var(--muted); font-size: 12px; }
 .empty, .error { color: var(--muted); padding: 48px 0; text-align: center; }
 .error { color: var(--del-text); }
-.hint { color: var(--muted); font-size: 13px; margin: 0 0 16px; }
-.legend { color: var(--muted); font-size: 12px; padding: 12px 20px; border-top: 1px solid var(--line); margin-top: 8px; display: grid; gap: 4px; }
+.legend { color: var(--muted); font-size: 12px; margin-top: 24px; display: flex; flex-wrap: wrap; gap: 4px 16px; }
+table.clean { width: 100%; border-collapse: collapse; font-size: 14px; }
+table.clean td, table.clean th { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+table.clean th { font-size: 12px; color: var(--muted); font-weight: 600; }
+.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+
 @media (max-width: 760px) {
-  header { padding: 10px 16px; }
-  .ranges { margin-left: 0; }
+  header { padding: 6px 16px; gap: 6px 10px; }
+  .summary .optional, .tools .optional { display: none; }
   .layout { grid-template-columns: 1fr; }
-  nav { position: static; max-height: 40vh; border-right: 0; border-bottom: 1px solid var(--line); }
-  .session { padding: 8px 16px; }
+  nav { position: static; height: auto; max-height: 42vh; border-right: 0; border-bottom: 1px solid var(--line); }
+  .project { padding-left: 16px; padding-right: 16px; }
+  .fold { padding-left: 32px; }
+  .session { padding: 6px 16px 6px 13px; }
+  .keys { display: none; }
   main { padding: 16px 16px 48px; }
+  .ranges { margin-left: 0; }
 }
 </style>
 </head>
 <body>
 <header>
-  <div>
-    <h1>Agent Diff</h1>
-    <div class="root" id="root"></div>
-  </div>
-  <div class="ranges" id="ranges">
-    <button data-range="">Uncommitted</button>
-    <button data-range="since=1h">1 hour</button>
-    <button data-range="since=today">Today</button>
-    <button data-range="since=7d">7 days</button>
-    <input id="custom" placeholder="3h, 2026-10-19 or main" aria-label="Since a time or commit">
-    <button id="reload" title="Read the changes again">Refresh</button>
+  <h1>Agent Diff</h1>
+  <div class="summary" id="summary"></div>
+  <div class="tools">
+    <span class="limits optional" id="limits"></span>
+    <button class="tbtn" id="notify" aria-pressed="false" title="Desktop notifications when a session starts waiting on you">Notify</button>
+    <button class="tbtn" id="cleanup" title="Idle sessions and worktrees nobody uses">Clean up</button>
+    <span class="optional" id="updated"></span>
   </div>
 </header>
 <div class="layout">
-  <nav id="nav"></nav>
-  <main id="main"><div class="empty">Reading transcripts…</div></main>
+  <nav id="nav" aria-label="Sessions"><div class="nav-empty">Looking for sessions…</div></nav>
+  <main id="main">
+    <div id="detail"></div>
+    <div id="answer"></div>
+    <div id="info"></div>
+    <section id="changes" class="changes" hidden></section>
+  </main>
 </div>
 <script>
 const params = new URLSearchParams(location.hash.slice(1));
 const token = params.get("t") || "";
-let range = params.get("since") ? "since=" + params.get("since") : params.get("base") ? "base=" + params.get("base") : "";
-let view = null;
-let selected = null;
+let range = params.get("since") ? "since=" + encodeURIComponent(params.get("since")) : params.get("base") ? "base=" + encodeURIComponent(params.get("base")) : "";
+let selected = params.get("s") || null;
+let inbox = null; // running sessions, in every repository
+let prev = null; // the inbox before, to notice sessions that start waiting
+let home = null; // changes in the repository the page was started in (sessions that ended, unattributed)
+let shown = { detail: "", answer: "", info: "", changes: "" }; // what each part shows, to repaint only on change
+const views = new Map(); // `${repo}|${range}` → { at, view }
+const screens = new Map(); // session → its herdr screen, once asked for
+const drafts = new Map(); // session → the prompt being written
 
 const $ = (id) => document.getElementById(id);
-const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
-const pad = (n) => String(n).padStart(2, "0");
-function when(ms) {
-  if (!ms) return "";
-  const d = new Date(ms);
-  return `${d.getMonth() + 1}/${d.getDate()} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+/** Escaped text with the Markdown agents use most inline: `code` and **bold**. */
+const inline = (t) => esc(t).replace(/`([^`\n]+)`/g, "<code>$1</code>").replace(/\*\*([^*\n]+)\*\*/g, "<b>$1</b>");
+const pad2 = (n) => String(n).padStart(2, "0");
+const when = (ms) => (ms ? `${new Date(ms).getMonth() + 1}/${new Date(ms).getDate()} ${pad2(new Date(ms).getHours())}:${pad2(new Date(ms).getMinutes())}` : "");
+function age(ms) {
+  const m = Math.max(0, Math.round((Date.now() - ms) / 6e4));
+  return m < 60 ? `${m}m` : m < 60 * 48 ? `${Math.round(m / 60)}h` : `${Math.round(m / 1440)}d`;
 }
+function ago(ms) {
+  const m = Math.max(0, Math.round((Date.now() - ms) / 6e4));
+  return m < 1 ? "just now" : m < 60 ? `${m} min ago` : m < 60 * 48 ? `${Math.round(m / 60)} h ago` : `${Math.round(m / 1440)} days ago`;
+}
+const base = (p) => (p || "").split("/").filter(Boolean).pop() || "";
+const lastLine = (t) => (t || "").trim().split("\n").filter((l) => l.trim()).pop() || "";
 const agentName = (a) => (a === "codex" ? "Codex" : "Claude");
 const hunkWord = (n) => `${n} hunk${n === 1 ? "" : "s"}`;
+const plural = (n, w) => `${n} ${w}${n === 1 ? "" : "s"}`;
+const kTokens = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : `${Math.round(n / 1000)}k`);
+const nameOf = (i) => i.title || i.name;
+const STATE = { "needs-answer": "Needs an answer", "your-turn": "Your turn", working: "Working", stale: "Idle" };
+const ORDER = { "needs-answer": 0, "your-turn": 1, working: 2, closed: 3, stale: 4 };
 const CONFIDENCE = {
   recorded: "Recorded by the hook as it happened",
   sure: "The transcript shows this exact edit",
@@ -128,22 +250,395 @@ const CONFIDENCE = {
   maybe: "The session touched the file; the lines did not match",
 };
 
+// Per-browser conveniences; the page works the same without storage.
+function stored(key, fallback) {
+  try {
+    const v = localStorage.getItem("agent-diff:" + key);
+    return v === null ? fallback : JSON.parse(v);
+  } catch {
+    return fallback;
+  }
+}
+function store(key, value) {
+  try {
+    localStorage.setItem("agent-diff:" + key, JSON.stringify(value));
+  } catch {
+    // storage blocked
+  }
+}
+const foldSaved = stored("fold", {});
+const fold = { projects: new Set(foldSaved.projects || []), idle: new Set(foldSaved.idle || []), held: new Set(foldSaved.held || []) };
+const saveFold = () => store("fold", { projects: [...fold.projects], idle: [...fold.idle], held: [...fold.held] });
+const toggle = (set, k) => (set.has(k) ? set.delete(k) : set.add(k));
+let comments = stored("comments", {}); // session → [{ file, header, excerpt, text }]
+let notifyOn = stored("notify", false) && typeof Notification !== "undefined" && Notification.permission === "granted";
+
 async function api(path, init = {}) {
   const res = await fetch(path, { ...init, headers: { "x-token": token, "content-type": "application/json" } });
   const body = await res.json();
   if (!res.ok) throw new Error(body.error || res.statusText);
   return body;
 }
+const post = (path, body) => api(path, { method: "POST", body: JSON.stringify(body) });
 
 function saveHash() {
   const p = new URLSearchParams({ t: token });
   if (range) {
     const [k, v] = range.split("=");
-    p.set(k, v);
+    p.set(k, decodeURIComponent(v));
   }
   if (selected) p.set("s", selected);
   history.replaceState(null, "", "#" + p.toString());
 }
+
+// ------------------------------------------------------------ data
+
+async function loadInbox() {
+  let next;
+  try {
+    next = await api("/api/inbox");
+  } catch (e) {
+    $("nav").innerHTML = `<div class="nav-empty error">${esc(e.message)}</div>`;
+    return;
+  }
+  prev = inbox;
+  inbox = next;
+  if (inbox.home && !home) await loadHome();
+  notifyChanges();
+  paint();
+}
+
+async function loadHome() {
+  try {
+    home = await view(inbox.home, true);
+  } catch {
+    home = null;
+  }
+}
+
+async function view(repo, fresh = false) {
+  const key = `${repo}|${range}`;
+  const hit = views.get(key);
+  if (hit && !fresh && Date.now() - hit.at < 5000) return hit.view;
+  const v = await api(`/api/view?repo=${encodeURIComponent(repo)}&${range}`);
+  views.set(key, { at: Date.now(), view: v });
+  if (inbox && repo === inbox.home) home = v;
+  return v;
+}
+
+/**
+ * Everything the list shows: running sessions, then sessions that ended but left changes here.
+ * `project` groups them (a repository's main checkout, worktrees included); `place` names the
+ * worktree when it is not the main one.
+ */
+function entries() {
+  const items = inbox ? inbox.items : [];
+  const live = new Set(items.map((i) => i.key));
+  const out = items.map((i) => ({ key: i.key, state: i.state, item: i, project: i.project || i.cwd || "", place: i.repo && i.repo !== i.project ? base(i.repo) : "" }));
+  if (home) {
+    const project = inbox.homeProject || home.root;
+    const place = home.root !== project ? base(home.root) : "";
+    for (const s of home.sessions) if (!live.has(s.key)) out.push({ key: s.key, state: "closed", session: s, project, place });
+    if (home.unknown.length) out.push({ key: "unknown", state: "closed", project, place });
+  }
+  return out;
+}
+const entry = (key) => entries().find((e) => e.key === key);
+const recency = (e) => (e.item ? e.item.since : e.session ? e.session.lastAt : 0);
+const waiting = (i) => (i.state === "needs-answer" || i.state === "your-turn") && !i.hold;
+
+/** Entries grouped by project: projects with the most urgent session first, then the most recent. */
+function projects() {
+  const map = new Map();
+  for (const e of entries()) {
+    let p = map.get(e.project);
+    if (!p) map.set(e.project, (p = { key: e.project, name: base(e.project) || "(no folder)", list: [] }));
+    p.list.push(e);
+  }
+  const rank = (e) => (e.item && e.item.hold ? 5 : ORDER[e.state]);
+  const out = [...map.values()];
+  for (const p of out) {
+    p.list.sort((a, b) => rank(a) - rank(b) || recency(b) - recency(a));
+    p.best = Math.min(...p.list.map(rank));
+    p.recent = Math.max(...p.list.map(recency));
+  }
+  return out.sort((a, b) => a.best - b.best || b.recent - a.recent);
+}
+
+function pickDefault() {
+  if (selected === "cleanup") return;
+  const all = entries();
+  if (selected && all.some((e) => e.key === selected)) return;
+  const visible = all.filter((e) => !(e.item && e.item.hold));
+  const first = visible.find((e) => e.state === "needs-answer") || visible.find((e) => e.state === "your-turn") || visible.find((e) => e.state !== "stale") || all[0];
+  selected = first ? first.key : null;
+}
+
+// ------------------------------------------------------------ list
+
+function snippet(e) {
+  if (e.key === "unknown") return "Changes no session explains";
+  if (e.session) return e.session.title || "(untitled)";
+  const i = e.item;
+  if (i.hold) return i.hold.kind === "later" && i.hold.until ? `later, until ${when(i.hold.until)}` : "done for now";
+  if (i.state === "needs-answer") return (i.questions && i.questions[0] && i.questions[0].question) || i.reason || "input needed";
+  if (i.state === "working") return (i.reason && i.reason !== "background command" ? i.reason : i.background && i.background[0] && i.background[0].command) || i.reason || (i.tasks && (i.tasks.find((t) => t.status === "in_progress") || {}).activeForm) || "working…";
+  return lastLine(i.awaySummary || i.lastMessage) || "(no reply yet)";
+}
+
+/** The worst CI state among a session's open pull requests. */
+function prState(i) {
+  const st = (i.prs || []).map((p) => inbox.prStatus && inbox.prStatus[p.url]).filter((s) => s && s.state === "OPEN");
+  return st.some((s) => s.ci === "failing") ? "failing" : st.some((s) => s.ci === "pending") ? "pending" : st.some((s) => s.ci === "passing") ? "passing" : "";
+}
+
+function contextLevel(c) {
+  if (!c || c.tokens === undefined) return "";
+  const limit = c.window || c.lastCompactTokens;
+  if (!limit) return "";
+  const r = c.tokens / limit;
+  return r >= (c.window ? 0.8 : 0.9) ? "full" : r >= 0.6 ? "warn" : "";
+}
+
+function chips(i) {
+  let html = "";
+  if (i.asks) html += '<span class="chip ask" title="Its last reply ends with a question">?</span>';
+  if (i.conflicts && i.conflicts.length) html += `<span class="chip conflict" title="Shares ${plural(i.conflicts.length, "file")} with another running session">⚠</span>`;
+  const pr = prState(i);
+  if (pr) html += `<span class="chip ${pr}" title="Pull request CI: ${pr}">PR</span>`;
+  if (i.tasks && i.tasks.length) html += `<span class="chip" title="Tasks done">${i.tasks.filter((t) => t.status === "completed").length}/${i.tasks.length}</span>`;
+  if (contextLevel(i.context) === "full") html += '<span class="chip ctx" title="Context nearly full">ctx</span>';
+  return html;
+}
+
+function row(e) {
+  const i = e.item;
+  const name = i ? nameOf(i) : e.key === "unknown" ? "Unattributed" : e.session.title || e.session.id.slice(0, 8);
+  const agent = i ? i.agent : e.session ? e.session.agent : "";
+  const right = i ? age(i.since) : e.session ? plural(e.session.files.length, "file") : plural(home.unknown.length, "file");
+  return `<button class="session" data-key="${esc(e.key)}" aria-current="${e.key === selected}">
+    <div class="row1"><span class="dot ${e.state}"></span><span class="name">${esc(name)}</span>${i ? chips(i) : ""}<span class="age">${esc(right)}</span></div>
+    <div class="row2">${agent ? `<span class="agent ${agent}">${agentName(agent)}</span>` : ""}${e.place ? `<span class="where">${esc(e.place)}</span>` : ""}<span class="snip">${esc(snippet(e))}</span></div></button>`;
+}
+
+function paintNav() {
+  const hours = inbox ? Math.round(inbox.staleAfter / 36e5) : 24;
+  const over = hours % 24 === 0 ? `${hours / 24}d` : `${hours}h`;
+  let html = "";
+  for (const p of projects()) {
+    const held = p.list.filter((e) => e.item && e.item.hold);
+    const rest = p.list.filter((e) => !(e.item && e.item.hold));
+    const count = (state) => rest.filter((e) => e.state === state).length;
+    const [answer, turn, working, idle] = [count("needs-answer"), count("your-turn"), count("working"), count("stale")];
+    const open = !fold.projects.has(p.key);
+    let counts = "";
+    if (answer) counts += `<span class="c needs-answer" title="Needs an answer">${answer}</span>`;
+    if (turn) counts += `<span class="c your-turn" title="Your turn">${turn}</span>`;
+    if (working) counts += `<span class="c other">${working} working</span>`;
+    if (!counts && idle && idle === rest.length) counts = `<span class="c other">${idle} idle</span>`;
+    html += `<button class="project" data-project="${esc(p.key)}" aria-expanded="${open}" title="${esc(p.key)}"><span class="chev">${open ? "▾" : "▸"}</span><span class="pname">${esc(p.name)}</span><span class="counts">${counts}</span></button>`;
+    if (!open) continue;
+    html += rest.filter((e) => e.state !== "stale").map(row).join("");
+    const stale = rest.filter((e) => e.state === "stale");
+    for (const [list, set, what] of [[held, fold.held, "on hold"], [stale, fold.idle, `idle for over ${over}`]]) {
+      if (!list.length) continue;
+      const shownList = set.has(p.key) || list.some((e) => e.key === selected);
+      html += `<button class="fold" data-fold="${what === "on hold" ? "held" : "idle"}" data-project="${esc(p.key)}" aria-expanded="${shownList}">${shownList ? "▾" : "▸"} ${list.length} ${what}</button>`;
+      if (shownList) html += list.map(row).join("");
+    }
+  }
+  if (!html) html = `<div class="nav-empty">${inbox ? "No running sessions." : "Looking for sessions…"}</div>`;
+  html += `<div class="keys"><kbd>↑</kbd> <kbd>↓</kbd> or <kbd>j</kbd> <kbd>k</kbd> to move</div>`;
+  const scroll = $("nav").scrollTop;
+  $("nav").innerHTML = html;
+  $("nav").scrollTop = scroll;
+}
+
+function paintHeader() {
+  const items = inbox ? inbox.items.filter((i) => !i.hold) : [];
+  const of = (s) => items.filter((i) => i.state === s).length;
+  const answer = of("needs-answer");
+  const turn = of("your-turn");
+  const working = of("working");
+  const parts = [];
+  if (answer) parts.push(`<span class="urgent"><b>${answer}</b> need${answer === 1 ? "s" : ""} an answer</span>`);
+  if (turn) parts.push(`<span><b>${turn}</b> your turn</span>`);
+  if (working) parts.push(`<span class="optional"><b>${working}</b> working</span>`);
+  if (!parts.length) parts.push("<span>Nothing waits on you</span>");
+  $("summary").innerHTML = parts.join("");
+  $("updated").textContent = inbox ? `Updated ${new Date(inbox.generatedAt).toLocaleTimeString()}` : "";
+  const l = inbox && inbox.codexLimits;
+  if (l && (l.primary || l.secondary)) {
+    const w = (r, name) => (r ? `${name} ${Math.round(r.usedPercent)}%` : "");
+    const high = [l.primary, l.secondary].some((r) => r && r.usedPercent >= 80);
+    $("limits").textContent = "Codex " + [w(l.primary, "5h"), w(l.secondary, "week")].filter(Boolean).join(" · ");
+    $("limits").className = "limits optional" + (high ? " high" : "");
+    $("limits").title = [l.primary && `5-hour window resets ${new Date(l.primary.resetsAt).toLocaleString()}`, l.secondary && `weekly window resets ${new Date(l.secondary.resetsAt).toLocaleString()}`].filter(Boolean).join("\n");
+  } else $("limits").textContent = "";
+  $("notify").setAttribute("aria-pressed", String(notifyOn));
+  $("cleanup").setAttribute("aria-pressed", String(selected === "cleanup"));
+  document.title = (answer + turn ? `(${answer + turn}) ` : "") + "Agent Diff";
+}
+
+// ------------------------------------------------------------ notifications
+
+/** Sessions that started waiting since the last look (the same rule as `agent-diff inbox --watch`). */
+function notifyChanges() {
+  if (!notifyOn || !prev || !inbox) return;
+  const before = new Map(prev.items.map((i) => [i.key, i]));
+  for (const i of inbox.items) {
+    if (!waiting(i)) continue;
+    const b = before.get(i.key);
+    if (b && waiting(b) && b.state === i.state && b.since === i.since) continue;
+    const title = i.state === "needs-answer" ? `${nameOf(i)} needs an answer` : `${nameOf(i)}: your turn`;
+    const body = i.state === "needs-answer" ? (i.questions && i.questions[0] && i.questions[0].question) || i.reason || "input needed" : lastLine(i.lastMessage) || "Finished its turn.";
+    try {
+      const n = new Notification(title, { body, tag: i.key });
+      n.onclick = () => {
+        window.focus();
+        select(i.key);
+        n.close();
+      };
+    } catch {
+      // notifications not available here
+    }
+  }
+}
+
+$("notify").onclick = async () => {
+  if (typeof Notification === "undefined") return alert("This browser has no notifications.");
+  if (!notifyOn && Notification.permission !== "granted") {
+    if ((await Notification.requestPermission()) !== "granted") return;
+  }
+  notifyOn = !notifyOn;
+  store("notify", notifyOn);
+  paintHeader();
+};
+
+// ------------------------------------------------------------ detail
+
+function paintDetail(e) {
+  if (selected === "cleanup") return;
+  if (!e) {
+    $("detail").innerHTML = `<div class="empty">${inbox ? "No running sessions, and no changes here." : "Looking for sessions…"}</div>`;
+    return;
+  }
+  if (e.key === "unknown") {
+    $("detail").innerHTML = `<div class="head"><h2>Unattributed</h2><div class="meta"><span class="path">${esc(home.root)}</span></div></div>
+      <p class="note">Edited by hand, by a tool, or by a session older than the transcripts read. With <code class="cmd">agent-diff install</code>, future shell edits are recorded too.</p>`;
+    return;
+  }
+  if (e.session) {
+    const s = e.session;
+    $("detail").innerHTML = `<div class="head"><h2>${esc(s.title || "(untitled)")}<span class="pill">Not running</span></h2>
+      <div class="meta"><span class="agent ${s.agent}">${agentName(s.agent)}</span><span class="id">${esc(s.id)}</span><span>${when(s.firstAt)} – ${when(s.lastAt)}</span></div></div>`;
+    return;
+  }
+  const i = e.item;
+  const meta = [
+    `<span class="agent ${i.agent}">${agentName(i.agent)}</span>`,
+    i.title && i.title !== i.name ? `<span>${esc(i.name)}</span>` : "",
+    `<span class="path">${esc(i.cwd || "")}</span>`,
+    `<span title="${esc(new Date(i.since).toLocaleString())}">${ago(i.since)}</span>`,
+    i.jobId ? `<span>background session ${esc(i.jobId)}</span>` : "",
+    i.herdr ? `<span title="herdr pane">herdr ${esc(i.herdr.pane)} · ${esc(i.herdr.status)}</span>` : "",
+    i.memory ? `<span>${Math.round(i.memory / 1e6)} MB</span>` : "",
+  ].join("");
+  const held = i.hold ? `<span class="pill">${i.hold.kind === "later" && i.hold.until ? `Later, until ${esc(when(i.hold.until))}` : "Done for now"}</span>` : "";
+  let html = `<div class="head"><h2>${esc(nameOf(i))}<span class="pill ${i.state}">${STATE[i.state]}</span>${held}</h2><div class="meta">${meta}</div></div>`;
+  html += `<div class="actions">`;
+  if (i.herdr) html += `<button class="btn" data-act="focus">Go to its pane</button>`;
+  if (i.hold) html += `<button class="btn" data-act="release">Back on the list</button>`;
+  else if (waiting(i) || i.state === "stale") html += `<button class="btn" data-act="later" data-until="1h">Later (1 h)</button><button class="btn" data-act="later" data-until="tomorrow">Tomorrow</button><button class="btn" data-act="done" title="Off the list until it does something new">Done</button>`;
+  html += `<code class="cmd">${esc(i.resume)}</code><button class="btn small" data-copy="${esc(i.resume)}">Copy</button><span class="note" id="act-note"></span></div>`;
+  if (i.state === "needs-answer") {
+    html += `<div class="block wait"><span class="reason">${esc(i.reason || "input needed")}</span>`;
+    for (const q of i.questions || []) html += `<div class="q">${esc(q.question)}${q.options.length ? `<div class="opts">${q.options.map((o, n) => `<span>${n + 1}. ${esc(o)}</span>`).join("")}</div>` : ""}</div>`;
+    html += `</div>`;
+  } else if (i.reason) html += `<div class="block"><span class="pill">${esc(i.reason)}</span></div>`;
+  if (i.conflicts && i.conflicts.length) {
+    const other = (k) => {
+      const o = inbox.items.find((x) => x.key === k);
+      return `<button class="linkish" data-goto="${esc(k)}">${esc(o ? nameOf(o) : k.split(":")[1].slice(0, 8))}</button>`;
+    };
+    html += `<div class="block warnbox"><b>Shared files.</b> Another running session has uncommitted changes in the same ${plural(i.conflicts.length, "file")}:<ul class="list">${i.conflicts.map((c) => `<li><code class="cmd">${esc(c.path)}</code> with ${c.with.map(other).join(", ")}</li>`).join("")}</ul>Staging with <code class="cmd">agent-diff add</code> keeps each session's hunks apart.</div>`;
+  }
+  if (i.awaySummary) html += `<div class="block"><div class="label">While you were away</div><div class="box summary-text">${inline(i.awaySummary)}</div></div>`;
+  if (i.lastPrompt) html += `<div class="block"><div class="label">You asked</div><div class="asked">${esc(i.lastPrompt)}</div></div>`;
+  $("detail").innerHTML = html;
+}
+
+/** Answering from the page, through herdr: the screen and keys when it asks, a prompt otherwise. */
+function paintAnswer(e) {
+  const i = e && e.item;
+  if (!i || selected === "cleanup") return void ($("answer").innerHTML = "");
+  if (!i.herdr) {
+    $("answer").innerHTML = waiting(i) ? `<p class="note">To answer from this page, run the session in a <a href="https://herdr.dev" target="_blank" rel="noopener">herdr</a> pane. Otherwise go back to it with the command above.</p>` : "";
+    return;
+  }
+  let html = `<div class="block box"><div class="label">Answer here</div>`;
+  if (i.state === "needs-answer") {
+    const keys = ["1", "2", "3", "4", "up", "down", "enter", "esc", "y", "n"];
+    const names = { up: "↑", down: "↓", enter: "Enter", esc: "Esc" };
+    html += `<div class="keypad">${keys.map((k) => `<button class="btn" data-key-press="${k}">${names[k] || k}</button>`).join("")}<button class="btn small" data-act="screen">Show its screen</button></div>`;
+    html += `<pre class="screen" id="screen" ${screens.has(i.key) ? "" : "hidden"}>${esc(screens.get(i.key) || "")}</pre>`;
+  } else {
+    html += `<textarea class="prompt" id="prompt" placeholder="Send ${esc(nameOf(i))} a prompt (Ctrl+Enter)">${esc(drafts.get(i.key) || "")}</textarea>
+      <div class="actions"><button class="btn primary" data-act="prompt">Send</button>${i.state === "working" ? '<span class="note">It is working; the prompt waits in its queue.</span>' : ""}</div>`;
+  }
+  html += `<p class="note" id="answer-note"></p></div>`;
+  $("answer").innerHTML = html;
+}
+
+function paintInfo(e) {
+  const i = e && e.item;
+  if (!i || selected === "cleanup") return void ($("info").innerHTML = "");
+  let html = "";
+  const text = i.lastMessage;
+  if (text) html += `<div class="block"><div class="label">Last reply</div><div class="box reply" id="reply">${inline(text)}</div></div>`;
+  const cards = [];
+  if (i.tasks && i.tasks.length) {
+    const done = i.tasks.filter((t) => t.status === "completed").length;
+    const mark = { completed: "✓", in_progress: "▸", pending: "○" };
+    cards.push(`<div class="box"><div class="label">Tasks ${done}/${i.tasks.length}</div><div class="bar"><span style="width:${Math.round((done / i.tasks.length) * 100)}%"></span></div>
+      <ul class="tasks">${i.tasks.map((t) => `<li class="${esc(t.status)}"><span class="mark">${mark[t.status] || "○"}</span><span>${esc(t.status === "in_progress" && t.activeForm ? t.activeForm : t.subject)}</span></li>`).join("")}</ul></div>`);
+  }
+  if (i.background && i.background.length) {
+    cards.push(`<div class="box"><div class="label">In the background</div><ul class="list">${i.background
+      .map((b) => {
+        const long = Date.now() - b.since > 6 * 36e5;
+        return `<li>${b.kind === "monitor" ? "Watching: " : ""}${esc(b.command)} <span class="sub${long ? " ci-pending" : ""}">running ${esc(age(b.since))}${long ? " — still needed?" : ""}</span></li>`;
+      })
+      .join("")}</ul></div>`);
+  }
+  if (i.prs && i.prs.length) {
+    cards.push(`<div class="box"><div class="label">Pull requests</div><ul class="list">${i.prs
+      .map((p) => {
+        const s = inbox.prStatus && inbox.prStatus[p.url];
+        if (!s) return `<li><a href="${esc(p.url)}" target="_blank" rel="noopener">#${esc(p.number)}</a> <span class="sub">${esc(p.repo)} · looking it up…</span></li>`;
+        const counts = [s.checks.failed && `${s.checks.failed} failed`, s.checks.pending && `${s.checks.pending} running`, s.checks.passed && `${s.checks.passed} passed`].filter(Boolean).join(", ");
+        const ci = s.state !== "OPEN" ? s.state.toLowerCase() : s.ci === "none" ? "no checks" : `CI: ${counts}`;
+        const extra = [s.draft ? "draft" : "", s.review ? s.review.toLowerCase().replace(/_/g, " ") : "", s.mergeState === "DIRTY" ? "has conflicts" : ""].filter(Boolean).join(" · ");
+        return `<li><a href="${esc(p.url)}" target="_blank" rel="noopener">#${esc(p.number)}</a> ${esc(s.title)} <div class="sub"><span class="ci-${esc(s.ci)}">${esc(ci)}</span>${extra ? ` · ${esc(extra)}` : ""}</div></li>`;
+      })
+      .join("")}</ul></div>`);
+  }
+  if (i.context) {
+    const c = i.context;
+    const limit = c.window || c.lastCompactTokens;
+    const level = contextLevel(c);
+    const what = c.tokens === undefined ? "unknown until its next request" : `${kTokens(c.tokens)} tokens${limit ? ` of ${c.window ? `a ${kTokens(c.window)} window` : `${kTokens(limit)} (where it last compacted)`}` : ""}`;
+    cards.push(`<div class="box"><div class="label">Context</div>${limit && c.tokens !== undefined ? `<div class="bar ${level}"><span style="width:${Math.min(100, Math.round((c.tokens / limit) * 100))}%"></span></div>` : ""}<div class="sub">${esc(what)}${c.compactions ? ` · compacted ${c.compactions}×` : ""}${level === "full" ? " · nearly full: it will compact soon" : ""}</div></div>`);
+  }
+  if (cards.length) html += `<div class="block grid">${cards.join("")}</div>`;
+  const scroll = $("reply") ? $("reply").scrollTop : null;
+  const atEnd = $("reply") ? $("reply").scrollTop + $("reply").clientHeight >= $("reply").scrollHeight - 4 : true;
+  $("info").innerHTML = html;
+  const reply = $("reply");
+  if (reply) reply.scrollTop = atEnd || scroll === null ? reply.scrollHeight : scroll; // the end is where a question usually is
+}
+
+// ------------------------------------------------------------ changes
 
 function rangeFromInput(text) {
   text = text.trim();
@@ -152,96 +647,108 @@ function rangeFromInput(text) {
   return "base=" + encodeURIComponent(text);
 }
 
-function paintRanges() {
-  for (const b of document.querySelectorAll("[data-range]")) b.setAttribute("aria-pressed", String(b.dataset.range === range));
-  const preset = [...document.querySelectorAll("[data-range]")].some((b) => b.dataset.range === range);
-  if (!preset && range) $("custom").value = decodeURIComponent(range.split("=")[1]);
-  else if (preset) $("custom").value = "";
+function rangesHtml() {
+  const presets = [["", "Uncommitted"], ["since=1h", "1 hour"], ["since=today", "Today"], ["since=7d", "7 days"]];
+  const custom = range && !presets.some(([r]) => r === range) ? decodeURIComponent(range.split("=")[1]) : "";
+  return `<div class="ranges">${presets.map(([r, l]) => `<button data-range="${r}" aria-pressed="${r === range}">${l}</button>`).join("")}
+    <input id="custom" placeholder="3h, a date or a branch" aria-label="Since a time or commit" value="${esc(custom)}">
+    <button id="reload" title="Read the changes again">Refresh</button></div>`;
 }
 
-async function refresh() {
-  paintRanges();
-  saveHash();
-  $("main").innerHTML = '<div class="empty">Reading transcripts…</div>';
-  try {
-    view = await api("/api/view?" + range);
-  } catch (e) {
-    $("nav").innerHTML = "";
-    $("main").innerHTML = `<div class="error">${esc(e.message)}</div>`;
-    return;
-  }
-  $("root").textContent = view.root;
-  const keys = [...view.sessions.map((s) => s.key), ...(view.unknown.length ? ["unknown"] : [])];
-  if (!keys.includes(selected)) selected = params.get("s") && keys.includes(params.get("s")) ? params.get("s") : keys[0] || null;
-  paintNav();
-  paintMain();
-}
+const hunkId = (f, h) => `${f.path}\n${h.header}`;
 
-function paintNav() {
-  const n = view.sessions.length;
-  let html = `<div class="count">${n} session${n === 1 ? "" : "s"} · ${esc(view.range)}</div>`;
-  for (const s of view.sessions) {
-    html += `<button class="session" data-key="${esc(s.key)}" aria-current="${s.key === selected}">
-      <div class="top"><span class="agent ${s.agent}">${agentName(s.agent)}</span><span class="id">${esc(s.id.slice(0, 8))}</span><span>${when(s.lastAt)}</span><span>${s.files.length} file${s.files.length === 1 ? "" : "s"}</span></div>
-      <div class="title">${esc(s.title || "(untitled)")}</div></button>`;
-  }
-  if (view.unknown.length) {
-    html += `<button class="session" data-key="unknown" aria-current="${selected === "unknown"}">
-      <div class="top"><span class="agent">Unattributed</span><span>${view.unknown.length} file${view.unknown.length === 1 ? "" : "s"}</span></div>
-      <div class="title">Changes no session explains</div></button>`;
-  }
-  html += `<div class="legend">${Object.entries(CONFIDENCE).map(([k, v]) => `<div><span class="badge ${k}">${k}</span> ${esc(v)}</div>`).join("")}</div>`;
-  $("nav").innerHTML = html;
-}
-
-function paintFile(f) {
+function paintFile(f, key) {
   const share = f.hunks.length === f.total ? hunkWord(f.total) : `${f.hunks.length} of ${hunkWord(f.total)}`;
+  const mine = (key && comments[key]) || [];
   let html = `<details class="file" open><summary><span class="st ${esc(f.status)}">${esc(f.status)}</span><span class="path">${esc(f.path)}</span><span class="share">${share}</span></summary><div class="diff">`;
   if (f.shell) html += `<div class="more">Shell commands in ${f.shell.map((k) => esc(k.split(":")[1].slice(0, 8))).join(", ")} mention this file.</div>`;
   for (const h of f.hunks) {
+    const id = hunkId(f, h);
     const badge = h.confidence ? `<span class="badge ${h.confidence}" title="${esc(CONFIDENCE[h.confidence])}">${h.confidence}</span>` : "";
-    html += `<div class="hunk-head"><span>${esc(h.header)}</span>${badge}</div>`;
-    for (const l of h.lines) {
-      const cls = l[0] === "+" ? "add" : l[0] === "-" ? "del" : "";
-      html += `<div class="l ${cls}">${esc(l) || " "}</div>`;
-    }
+    const btn = key ? `<button class="btn small comment-btn" data-comment="${esc(id)}">Comment</button>` : "";
+    html += `<div class="hunk-head"><span>${esc(h.header)}</span>${badge}${btn}</div>`;
+    for (const l of h.lines) html += `<div class="l ${l[0] === "+" ? "add" : l[0] === "-" ? "del" : ""}">${esc(l) || " "}</div>`;
     if (h.truncated) html += `<div class="more">… ${h.truncated} more lines</div>`;
+    mine.forEach((c, n) => {
+      if (c.id === id) html += `<div class="comment"><span class="text">${esc(c.text)}</span><button class="btn small" data-uncomment="${n}">Remove</button></div>`;
+    });
+    html += `<div class="comment" data-editor="${esc(id)}" hidden><textarea aria-label="Comment on this hunk"></textarea><button class="btn small primary" data-save-comment="${esc(id)}">Add</button></div>`;
   }
   if (!f.hunks.length) html += `<div class="more">Binary or too large to show.</div>`;
   return html + "</div></details>";
 }
 
-function paintMain() {
-  if (!selected) {
-    $("main").innerHTML = `<div class="empty">No changes ${range ? "in this range" : "in the working tree"}.</div>`;
+const legend = () => `<div class="legend">${Object.entries(CONFIDENCE).map(([k, v]) => `<span><span class="badge ${k}">${k}</span> ${esc(v)}</span>`).join("")}</div>`;
+
+/** The review comments on a session's changes, as a request it can act on. */
+function reviewText(key) {
+  const list = comments[key] || [];
+  const parts = list.map((c, n) => `${n + 1}. ${c.file}, at ${c.header}\n${c.excerpt.map((l) => `   > ${l}`).join("\n")}\n   ${c.text.replace(/\n/g, "\n   ")}`);
+  return `Review comments on your uncommitted changes:\n\n${parts.join("\n\n")}\n\nPlease address them, then say what you changed.`;
+}
+
+function reviewBar(key, item) {
+  const n = (comments[key] || []).length;
+  if (!n) return "";
+  return `<div class="review"><b>${plural(n, "comment")}</b> on this session's changes ${item && item.herdr ? `<button class="btn primary" data-act="send-review">Send to the session</button>` : ""}<button class="btn" data-act="copy-review">Copy as a request</button><button class="btn" data-act="clear-review">Discard</button><span class="note" id="review-note"></span></div>`;
+}
+
+/** The repository whose changes go with the entry. */
+function repoOf(e) {
+  if (!e) return null;
+  if (e.item) return e.item.repo || null;
+  return home ? home.root : null;
+}
+
+async function paintChanges(e, fresh = false) {
+  const box = $("changes");
+  if (!e || selected === "cleanup") return void (box.hidden = true);
+  box.hidden = false;
+  const repo = repoOf(e);
+  const head = (sub) => `<div class="changes-head"><h3>Changes</h3><span class="sub">${sub}</span>${repo ? rangesHtml() : ""}</div>`;
+  if (!repo) {
+    box.innerHTML = head("") + `<div class="note">${esc((e.item && e.item.cwd) || "Its folder")} is not in a git repository.</div>`;
     return;
   }
-  if (selected === "unknown") {
-    $("main").innerHTML = `<div class="head"><h2>Unattributed</h2></div>
-      <p class="hint">Edited by hand, by a tool, or by a session older than the transcripts read. With <code class="cmd">agent-diff install</code>, future shell edits are recorded too.</p>
-      ${view.unknown.map(paintFile).join("")}`;
+  const wanted = `${e.key}|${repo}|${range}`;
+  shown.changes = wanted;
+  if (!box.querySelector(".file")) box.innerHTML = head(esc(base(repo))) + `<div class="note">Reading transcripts…</div>`;
+  let v;
+  try {
+    v = await view(repo, fresh);
+  } catch (err) {
+    if (shown.changes === wanted) box.innerHTML = head(esc(base(repo))) + `<div class="note error">${esc(err.message)}</div>`;
     return;
   }
-  const s = view.sessions.find((x) => x.key === selected);
+  if (shown.changes !== wanted) return; // the selection moved on meanwhile
+  const where = `${esc(base(repo))} · ${esc(v.range)}`;
+  if (e.key === "unknown") {
+    box.innerHTML = head(where) + (v.unknown.length ? v.unknown.map((f) => paintFile(f)).join("") + legend() : `<div class="note">None ${range ? "in this range" : "in the working tree"}.</div>`);
+    return;
+  }
+  const s = v.sessions.find((x) => x.key === e.key);
+  if (!s) {
+    box.innerHTML = head(where) + `<div class="note">No changes by this session ${range ? "in this range" : "in the working tree"}.</div>`;
+    return;
+  }
   const hunks = s.files.reduce((n, f) => n + f.hunks.length, 0);
   const stage = range ? "" : `<button class="btn primary" id="stage">Stage this session's changes</button>`;
-  $("main").innerHTML = `<div class="head"><h2>${esc(s.title || "(untitled)")}</h2>
-    <div class="meta"><span class="agent ${s.agent}">${agentName(s.agent)}</span><span class="id">${esc(s.id)}</span><span>${when(s.firstAt)} – ${when(s.lastAt)}</span><span>${s.files.length} file${s.files.length === 1 ? "" : "s"}, ${hunkWord(hunks)}</span></div></div>
-    <div class="actions">${stage}<code class="cmd">agent-diff add ${esc(s.id.slice(0, 8))}</code></div>
-    <div id="plan"></div>
-    ${s.files.map(paintFile).join("")}`;
-  if (stage) $("stage").onclick = () => planStage(s);
+  box.innerHTML = head(`${where} · ${plural(s.files.length, "file")}, ${hunkWord(hunks)}`) + `<div id="review-slot">${reviewBar(e.key, e.item)}</div>` +
+    `<div class="stage-row">${stage}<code class="cmd">agent-diff add ${esc(s.id.slice(0, 8))}</code></div><div id="plan"></div>` +
+    s.files.map((f) => paintFile(f, e.key)).join("") + legend();
+  if (stage) $("stage").onclick = () => planStage(repo, s);
 }
 
 function list(items) {
   return items.length ? `<ul>${items.map((i) => `<li>${esc(i)}</li>`).join("")}</ul>` : "";
 }
 
-async function planStage(s) {
+async function planStage(repo, s) {
   const box = $("plan");
+  const path = `/api/stage?repo=${encodeURIComponent(repo)}&${range}`;
   box.innerHTML = `<div class="plan">Working out what to stage…</div>`;
   try {
-    const plan = await api("/api/stage?" + range, { method: "POST", body: JSON.stringify({ session: s.key }) });
+    const plan = await post(path, { session: s.key });
     const items = [...plan.whole, ...plan.partial.map((p) => `${p.path}  (${hunkWord(p.hunks)} of its changes)`)];
     box.innerHTML = `<div class="plan">${items.length ? "This adds to the index:" : "Nothing to stage."}${list(items)}
       ${plan.skipped.length ? "Skipped:" + list(plan.skipped) : ""}
@@ -250,7 +757,7 @@ async function planStage(s) {
     $("cancel").onclick = () => (box.innerHTML = "");
     $("confirm").onclick = async () => {
       try {
-        await api("/api/stage?" + range, { method: "POST", body: JSON.stringify({ session: s.key, apply: true }) });
+        await post(path, { session: s.key, apply: true });
         box.innerHTML = `<div class="plan">Staged. Check with <code class="cmd">git diff --cached --stat</code>.</div>`;
       } catch (e) {
         box.innerHTML = `<div class="plan error">${esc(e.message)}</div>`;
@@ -261,26 +768,270 @@ async function planStage(s) {
   }
 }
 
-$("nav").addEventListener("click", (e) => {
-  const b = e.target.closest(".session");
-  if (!b) return;
-  selected = b.dataset.key;
+// ------------------------------------------------------------ clean up
+
+async function paintCleanup() {
+  $("answer").innerHTML = $("info").innerHTML = "";
+  $("changes").hidden = true;
+  $("detail").innerHTML = `<div class="head"><h2>Clean up</h2><div class="meta">Idle sessions and worktrees nobody uses. Nothing is closed or removed for you: copy the commands you want.</div></div><div class="note">Looking…</div>`;
+  let c;
+  try {
+    c = await api("/api/cleanup");
+  } catch (e) {
+    $("detail").innerHTML += `<div class="note error">${esc(e.message)}</div>`;
+    return;
+  }
+  if (selected !== "cleanup") return;
+  const mb = (b) => `${Math.round(b / 1e6)} MB`;
+  const total = c.sessions.reduce((n, s) => n + (s.memory || 0), 0);
+  let html = `<div class="head"><h2>Clean up</h2><div class="meta">Idle sessions and worktrees nobody uses. Nothing is closed or removed for you: copy the commands you want.</div></div>`;
+  html += `<div class="block"><div class="label">Idle sessions · ${c.sessions.length}${total ? ` · ${mb(total)} in all` : ""}</div>`;
+  html += c.sessions.length
+    ? `<table class="clean"><tr><th>Session</th><th>Idle</th><th class="num">Memory</th><th>Close</th></tr>${c.sessions
+        .map((s) => `<tr><td><button class="linkish" data-goto="${esc(s.key)}">${esc(s.title || s.name)}</button><div class="sub">${esc(base(s.cwd))}</div></td><td>${esc(age(s.idleSince))}</td><td class="num">${s.memory ? mb(s.memory) : ""}</td><td>${s.close ? `<code class="cmd">${esc(s.close)}</code> <button class="btn small" data-copy="${esc(s.close)}">Copy</button>` : '<span class="sub">close it where it runs</span>'}<div class="sub">later: ${esc(s.resume)}</div></td></tr>`)
+        .join("")}</table>`
+    : `<p class="note">None.</p>`;
+  html += `</div>`;
+  const removable = c.worktrees.filter((w) => w.removable);
+  const kept = c.worktrees.filter((w) => !w.removable);
+  html += `<div class="block"><div class="label">Worktrees that can go · ${removable.length}</div>`;
+  html += removable.length
+    ? removable
+        .map((w) => {
+          const why = w.prunable ? "its folder is gone" : w.merged ? "merged" : "its remote branch was deleted";
+          const cmds = w.commands.join(" && ");
+          return `<div class="box" style="margin-bottom:8px"><code class="cmd">${esc(w.path)}</code> ${w.branch ? `<span class="sub">${esc(w.branch)}</span>` : ""} <span class="sub">· ${esc(why)}</span><div class="actions"><code class="cmd">${esc(cmds)}</code><button class="btn small" data-copy="${esc(cmds)}">Copy</button></div></div>`;
+        })
+        .join("")
+    : `<p class="note">None.</p>`;
+  if (kept.length) html += `<p class="note">Kept: ${kept.map((w) => `${esc(base(w.path))} (${w.sessions.length ? "in use" : w.dirty ? "uncommitted changes" : w.locked ? "locked" : "not merged"})`).join(", ")}</p>`;
+  html += `</div>`;
+  $("detail").innerHTML = html;
+}
+
+// ------------------------------------------------------------ painting and events
+
+/** Repaints the list; repaints each part of the detail only when what it shows changed. */
+function paint() {
+  pickDefault();
   saveHash();
+  paintHeader();
   paintNav();
-  paintMain();
+  if (selected === "cleanup") return;
+  const e = entry(selected);
+  const i = e && e.item;
+  // Memory moves a little on every look; only repaint for a change worth showing.
+  const detailKey = JSON.stringify(e ? { k: e.key, s: e.state, i: i && { ...i, lastMessage: undefined, tasks: undefined, background: undefined, prs: undefined, context: undefined, memory: Math.round((i.memory || 0) / 5e7) }, x: e.session && e.session.lastAt } : null);
+  if (detailKey !== shown.detail) {
+    shown.detail = detailKey;
+    paintDetail(e);
+  }
+  const answerKey = i ? `${i.key}|${i.state}|${!!i.herdr}` : "";
+  if (answerKey !== shown.answer) {
+    shown.answer = answerKey;
+    paintAnswer(e);
+  }
+  const infoKey = JSON.stringify(i ? [i.lastMessage, i.tasks, i.background, i.prs && i.prs.map((p) => [p.url, (inbox.prStatus || {})[p.url]]), i.context] : null);
+  if (infoKey !== shown.info) {
+    shown.info = infoKey;
+    paintInfo(e);
+  }
+  const changesKey = e ? `${e.key}|${e.state}|${i ? i.since : ""}` : "";
+  if (changesKey !== shown.changesFor) {
+    const same = shown.changesFor && shown.changesFor.split("|")[0] === (e && e.key);
+    shown.changesFor = changesKey;
+    // Same session in a new state (it finished a turn, wrote more): read its changes again.
+    void paintChanges(e, same);
+  }
+}
+
+function select(key) {
+  if (!key) return;
+  if (key !== selected) {
+    selected = key;
+    shown = { detail: "", answer: "", info: "", changes: "" };
+    $("changes").innerHTML = "";
+  }
+  if (key === "cleanup") {
+    saveHash();
+    paintHeader();
+    paintNav();
+    void paintCleanup();
+  } else paint();
   window.scrollTo(0, 0);
+}
+
+function setRange(r) {
+  range = r;
+  shown.changesFor = "";
+  $("changes").innerHTML = "";
+  if (inbox && inbox.home) void loadHome().then(paint);
+  else paint();
+}
+
+async function act(name, el) {
+  const i = entry(selected) && entry(selected).item;
+  const note = (id, text, ok) => {
+    const n = $(id);
+    if (n) ((n.textContent = text), (n.className = "note" + (ok ? " ok" : " error")));
+  };
+  try {
+    if (name === "focus") {
+      await post("/api/herdr/focus", { key: i.key });
+      note("act-note", "Focused in herdr.", true);
+    } else if (name === "later" || name === "done") {
+      await post("/api/hold", { key: i.key, kind: name, until: el.dataset.until });
+      await loadInbox();
+    } else if (name === "release") {
+      await post("/api/release", { key: i.key });
+      await loadInbox();
+    } else if (name === "screen") {
+      const { text } = await api(`/api/herdr/screen?key=${encodeURIComponent(i.key)}`);
+      screens.set(i.key, text);
+      $("screen").textContent = text;
+      $("screen").hidden = false;
+      $("screen").scrollTop = $("screen").scrollHeight;
+    } else if (name === "prompt") {
+      const text = $("prompt").value.trim();
+      if (!text) return;
+      await post("/api/herdr/prompt", { key: i.key, text });
+      drafts.delete(i.key);
+      $("prompt").value = "";
+      note("answer-note", "Sent.", true);
+    } else if (name === "copy-review") {
+      await navigator.clipboard.writeText(reviewText(selected));
+      note("review-note", "Copied. Paste it into the session.", true);
+    } else if (name === "send-review") {
+      await post("/api/herdr/prompt", { key: i.key, text: reviewText(selected) });
+      delete comments[selected];
+      store("comments", comments);
+      $("review-slot").innerHTML = `<p class="note ok">Sent to the session.</p>`;
+      shown.changesFor = "";
+    } else if (name === "clear-review") {
+      delete comments[selected];
+      store("comments", comments);
+      shown.changesFor = "";
+      paint();
+    }
+  } catch (e) {
+    note(name === "prompt" || name === "screen" ? "answer-note" : name.endsWith("review") ? "review-note" : "act-note", e.message, false);
+  }
+}
+
+async function pressKey(k) {
+  const i = entry(selected) && entry(selected).item;
+  try {
+    await post("/api/herdr/keys", { key: i.key, keys: [k] });
+    $("answer-note").textContent = `Sent ${k}.`;
+    $("answer-note").className = "note ok";
+    setTimeout(() => $("screen") && !$("screen").hidden && act("screen"), 600); // show what it did
+  } catch (e) {
+    $("answer-note").textContent = e.message;
+    $("answer-note").className = "note error";
+  }
+}
+
+$("nav").addEventListener("click", (ev) => {
+  const project = ev.target.closest(".project");
+  const f = ev.target.closest(".fold");
+  if (project || f) {
+    toggle(project ? fold.projects : fold[f.dataset.fold], (project || f).dataset.project);
+    saveFold();
+    paintNav();
+    return;
+  }
+  const b = ev.target.closest(".session");
+  if (b) select(b.dataset.key);
 });
-for (const b of document.querySelectorAll("[data-range]")) b.onclick = () => ((range = b.dataset.range), refresh());
-$("custom").addEventListener("keydown", (e) => {
-  if (e.key === "Enter") {
-    range = rangeFromInput(e.target.value);
-    refresh();
+
+document.addEventListener("keydown", (ev) => {
+  if (ev.target.closest && ev.target.closest("input, textarea")) return;
+  if (ev.metaKey || ev.ctrlKey || ev.altKey) return;
+  const step = ev.key === "ArrowDown" || ev.key === "j" ? 1 : ev.key === "ArrowUp" || ev.key === "k" ? -1 : 0;
+  if (!step) return;
+  const keys = [...$("nav").querySelectorAll(".session")].map((b) => b.dataset.key);
+  if (!keys.length) return;
+  ev.preventDefault();
+  select(keys[Math.min(keys.length - 1, Math.max(0, keys.indexOf(selected) + step))]);
+  const cur = $("nav").querySelector('.session[aria-current="true"]');
+  if (cur) cur.scrollIntoView({ block: "nearest" });
+});
+
+$("main").addEventListener("click", (ev) => {
+  const t = ev.target;
+  const copy = t.closest("[data-copy]");
+  if (copy) {
+    navigator.clipboard?.writeText(copy.dataset.copy).then(() => ((copy.textContent = "Copied"), setTimeout(() => (copy.textContent = "Copy"), 1200)));
+    return;
+  }
+  const go = t.closest("[data-goto]");
+  if (go) return void select(go.dataset.goto);
+  const a = t.closest("[data-act]");
+  if (a) return void act(a.dataset.act, a);
+  const k = t.closest("[data-key-press]");
+  if (k) return void pressKey(k.dataset.keyPress);
+  const c = t.closest("[data-comment]");
+  if (c) {
+    const ed = [...document.querySelectorAll("[data-editor]")].find((x) => x.dataset.editor === c.dataset.comment);
+    if (ed) {
+      ed.hidden = !ed.hidden;
+      if (!ed.hidden) ed.querySelector("textarea").focus();
+    }
+    return;
+  }
+  const save = t.closest("[data-save-comment]");
+  if (save) {
+    const ed = save.closest("[data-editor]");
+    const text = ed.querySelector("textarea").value.trim();
+    if (!text) return;
+    const [file, header] = save.dataset.saveComment.split("\n");
+    const hunkHead = [...document.querySelectorAll(".hunk-head")].find((h) => h.querySelector("[data-comment]") && h.querySelector("[data-comment]").dataset.comment === save.dataset.saveComment);
+    const excerpt = [];
+    for (let n = hunkHead && hunkHead.nextElementSibling; n && n.classList.contains("l") && excerpt.length < 6; n = n.nextElementSibling) if (/^[+-]/.test(n.textContent)) excerpt.push(n.textContent);
+    (comments[selected] ||= []).push({ id: save.dataset.saveComment, file, header, excerpt, text });
+    store("comments", comments);
+    shown.changesFor = "";
+    paint();
+    return;
+  }
+  const un = t.closest("[data-uncomment]");
+  if (un) {
+    (comments[selected] || []).splice(Number(un.dataset.uncomment), 1);
+    if (!(comments[selected] || []).length) delete comments[selected];
+    store("comments", comments);
+    shown.changesFor = "";
+    paint();
+    return;
+  }
+  const r = t.closest("[data-range]");
+  if (r) return void setRange(r.dataset.range);
+  if (t.closest("#reload")) {
+    void paintChanges(entry(selected), true);
+    if (inbox && inbox.home) void loadHome().then(paint);
   }
 });
-$("reload").onclick = refresh;
 
-if (!token) $("main").innerHTML = '<div class="error">Open the full URL that agent-diff view printed.</div>';
-else refresh();
+$("main").addEventListener("keydown", (ev) => {
+  if (ev.target.id === "custom" && ev.key === "Enter") setRange(rangeFromInput(ev.target.value));
+  if (ev.target.id === "prompt" && ev.key === "Enter" && (ev.ctrlKey || ev.metaKey)) act("prompt");
+});
+$("main").addEventListener("input", (ev) => {
+  if (ev.target.id === "prompt") drafts.set(selected, ev.target.value);
+});
+
+$("cleanup").onclick = () => {
+  if (selected !== "cleanup") return select("cleanup");
+  selected = null; // back to the sessions
+  shown = { detail: "", answer: "", info: "", changes: "" };
+  paint();
+};
+
+setInterval(() => {
+  if (token && !document.hidden) void loadInbox();
+}, 5000);
+
+if (!token) $("main").innerHTML = '<div class="error">Open the full URL that agent-diff printed (it carries the access token).</div>';
+else void loadInbox();
 </script>
 </body>
 </html>
