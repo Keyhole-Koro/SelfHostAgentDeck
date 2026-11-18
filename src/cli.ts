@@ -7,6 +7,7 @@ import { serve } from "./server.ts";
 import { runHook } from "./hook.ts";
 import { holdCommand, loadInbox, printCleanup, printInbox, publishInbox, publisher, watchInbox } from "./inbox-cli.ts";
 import { agentInstalled, installHooks, installSkills, installStatusLine, uninstallHooks, uninstallSkills, uninstallStatusLine } from "./install.ts";
+import { remoteCommand } from "./remote-cli.ts";
 import { statusLineFor } from "./statusline.ts";
 import { bold, cyan, dim, green, red, when, yellow } from "./term.ts";
 import type { Session, Transcripts } from "./types.ts";
@@ -26,6 +27,9 @@ const HELP = `agent-diff — which Claude Code or Codex session made each uncomm
   agent-diff later <session> Take a session off the list for a while (--until 2h, tomorrow, 9:00)
   agent-diff done <session>  Take a session off the list until it does something new
   agent-diff unhold <session>  Put it back
+  agent-diff remote pair     A one-time link (and QR code) to add a phone that opens the page at
+                             the --remote origin and signs in with a passkey
+  agent-diff remote devices | revoke <id> | log   The devices added, removing one, what they did
   agent-diff cleanup         Idle sessions and worktrees nobody uses, with the commands to close
                              or remove them (nothing is removed for you)
   agent-diff statusline      One line for Claude Code's status line: the other sessions that wait
@@ -45,6 +49,8 @@ Options
   --all            With inbox: list the sessions left alone one by one
   --interval <s>   With inbox --watch: seconds between looks (default 5)
   --no-herdr       With view: leave herdr alone (no pane states, no focusing or sending)
+  --remote <url>   With view: also serve the page to devices signed in with a passkey at this
+                   public origin (https://…), on --remote-port (default 47301) for a tunnel
   --json           Machine-readable output
 
   --self           With show/add: the Claude Code or Codex session running the command
@@ -208,6 +214,9 @@ function main(): void {
       until: { type: "string" },
       statusline: { type: "boolean" },
       herdr: { type: "boolean", default: true },
+      remote: { type: "string" },
+      "remote-port": { type: "string" },
+      origin: { type: "string" },
       publish: { type: "boolean" },
       help: { type: "boolean", short: "h" },
     },
@@ -222,6 +231,7 @@ function main(): void {
   const days = o.days ? Number(o.days) : 30;
   const staleAfter = o.stale ? Date.now() - parseSince(o.stale) : undefined;
   if (command === "later" || command === "done" || command === "unhold") return void holdCommand(command, given, o.until);
+  if (command === "remote") return void remoteCommand(given, positionals[2], o.origin);
   if (command === "cleanup") return void printCleanup(staleAfter);
   if (command === "inbox" && o.watch) {
     void watchInbox({ staleAfter, interval: (o.interval ? Number(o.interval) : 5) * 1000, notify: !!o.notify, ...(o.publish && { onChange: publisher() }) });
@@ -251,10 +261,21 @@ function main(): void {
     } catch (e) {
       if (command === "view") throw e;
     }
-    void serve({ root, days, staleAfter, port: o.port ? Number(o.port) : 0, herdr: o.herdr }).then((url) => {
-      const query = o.since ? `&since=${encodeURIComponent(o.since)}` : o.base ? `&base=${encodeURIComponent(o.base)}` : "";
-      console.log(`Agent Diff${root ? ` for ${root}` : ""}\n\n  ${url}${query}\n\nOpen it in a browser. Ctrl-C to stop.`);
-    });
+    const remote = o.remote ? { origin: o.remote, port: o["remote-port"] ? Number(o["remote-port"]) : 47301 } : undefined;
+    void serve({ root, days, staleAfter, port: o.port ? Number(o.port) : 0, herdr: o.herdr, ...(remote && { remote }) }).then(
+      (served) => {
+        const query = o.since ? `&since=${encodeURIComponent(o.since)}` : o.base ? `&base=${encodeURIComponent(o.base)}` : "";
+        console.log(`Agent Diff${root ? ` for ${root}` : ""}\n\n  ${served.url}${query}\n\nOpen it in a browser. Ctrl-C to stop.`);
+        if (served.remote) {
+          console.log(`\nRemote: ${served.remote.origin} (point the tunnel at http://127.0.0.1:${served.remote.port}).`);
+          console.log(`Add a device with: agent-diff remote pair`);
+        }
+      },
+      (e: Error) => {
+        console.error(e.message);
+        process.exitCode = 1;
+      },
+    );
     return;
   }
   const root = repoRoot(o.C ?? process.cwd());

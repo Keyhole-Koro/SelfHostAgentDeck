@@ -172,6 +172,10 @@ table.clean { width: 100%; border-collapse: collapse; font-size: 14px; }
 table.clean td, table.clean th { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
 table.clean th { font-size: 12px; color: var(--muted); font-weight: 600; }
 .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.pair { display: flex; flex-wrap: wrap; gap: 16px; align-items: center; }
+.pair .qr { width: 200px; height: 200px; background: #fff; padding: 6px; border-radius: 8px; }
+.pair .qr svg { width: 100%; height: 100%; }
+.pair p { margin: 0 0 8px; font-size: 14px; }
 
 @media (max-width: 760px) {
   header { padding: 6px 16px; gap: 6px 10px; }
@@ -195,6 +199,7 @@ table.clean th { font-size: 12px; color: var(--muted); font-weight: 600; }
     <span class="limits optional" id="limits"></span>
     <button class="tbtn" id="notify" aria-pressed="false" title="Desktop notifications when a session starts waiting on you">Notify</button>
     <button class="tbtn" id="cleanup" title="Idle sessions and worktrees nobody uses">Clean up</button>
+    <button class="tbtn" id="remote" title="Use this page from your phone">Remote</button>
     <span class="optional" id="updated"></span>
   </div>
 </header>
@@ -210,6 +215,8 @@ table.clean th { font-size: 12px; color: var(--muted); font-weight: 600; }
 <script>
 const params = new URLSearchParams(location.hash.slice(1));
 const token = params.get("t") || "";
+/** "remote": served through the tunnel to a device signed in with a passkey (no token, a cookie). */
+const mode = (document.querySelector('meta[name="agent-diff-mode"]') || {}).content || "local";
 let range = params.get("since") ? "since=" + encodeURIComponent(params.get("since")) : params.get("base") ? "base=" + encodeURIComponent(params.get("base")) : "";
 let selected = params.get("s") || null;
 let inbox = null; // running sessions, in every repository
@@ -241,6 +248,8 @@ const hunkWord = (n) => `${n} hunk${n === 1 ? "" : "s"}`;
 const plural = (n, w) => `${n} ${w}${n === 1 ? "" : "s"}`;
 const kTokens = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : `${Math.round(n / 1000)}k`);
 const nameOf = (i) => i.title || i.name;
+/** The views that are not a session: clean-up and remote access. */
+const special = () => selected === "cleanup" || selected === "remote";
 const STATE = { "needs-answer": "Needs an answer", "your-turn": "Your turn", working: "Working", stale: "Idle" };
 const ORDER = { "needs-answer": 0, "your-turn": 1, working: 2, closed: 3, stale: 4 };
 const CONFIDENCE = {
@@ -274,7 +283,12 @@ let comments = stored("comments", {}); // session → [{ file, header, excerpt, 
 let notifyOn = stored("notify", false) && typeof Notification !== "undefined" && Notification.permission === "granted";
 
 async function api(path, init = {}) {
-  const res = await fetch(path, { ...init, headers: { "x-token": token, "content-type": "application/json" } });
+  const headers = { "content-type": "application/json", "x-agent-diff": "1", ...(token && { "x-token": token }) };
+  const res = await fetch(path, { ...init, headers, credentials: "same-origin" });
+  if (res.status === 401 && mode === "remote") {
+    location.assign("/login"); // the session ended: sign in again
+    throw new Error("Signing in again…");
+  }
   const body = await res.json();
   if (!res.ok) throw new Error(body.error || res.statusText);
   return body;
@@ -282,7 +296,7 @@ async function api(path, init = {}) {
 const post = (path, body) => api(path, { method: "POST", body: JSON.stringify(body) });
 
 function saveHash() {
-  const p = new URLSearchParams({ t: token });
+  const p = new URLSearchParams(token ? { t: token } : {});
   if (range) {
     const [k, v] = range.split("=");
     p.set(k, decodeURIComponent(v));
@@ -366,7 +380,7 @@ function projects() {
 }
 
 function pickDefault() {
-  if (selected === "cleanup") return;
+  if (special()) return;
   const all = entries();
   if (selected && all.some((e) => e.key === selected)) return;
   const visible = all.filter((e) => !(e.item && e.item.hold));
@@ -477,6 +491,7 @@ function paintHeader() {
   } else $("limits").textContent = "";
   $("notify").setAttribute("aria-pressed", String(notifyOn));
   $("cleanup").setAttribute("aria-pressed", String(selected === "cleanup"));
+  $("remote").setAttribute("aria-pressed", String(selected === "remote"));
   document.title = (answer + turn ? `(${answer + turn}) ` : "") + "Agent Diff";
 }
 
@@ -518,7 +533,7 @@ $("notify").onclick = async () => {
 // ------------------------------------------------------------ detail
 
 function paintDetail(e) {
-  if (selected === "cleanup") return;
+  if (special()) return;
   if (!e) {
     $("detail").innerHTML = `<div class="empty">${inbox ? "No running sessions, and no changes here." : "Looking for sessions…"}</div>`;
     return;
@@ -571,7 +586,7 @@ function paintDetail(e) {
 /** Answering from the page, through herdr: the screen and keys when it asks, a prompt otherwise. */
 function paintAnswer(e) {
   const i = e && e.item;
-  if (!i || selected === "cleanup") return void ($("answer").innerHTML = "");
+  if (!i || special()) return void ($("answer").innerHTML = "");
   if (!i.herdr) {
     $("answer").innerHTML = waiting(i) ? `<p class="note">To answer from this page, run the session in a <a href="https://herdr.dev" target="_blank" rel="noopener">herdr</a> pane. Otherwise go back to it with the command above.</p>` : "";
     return;
@@ -592,7 +607,7 @@ function paintAnswer(e) {
 
 function paintInfo(e) {
   const i = e && e.item;
-  if (!i || selected === "cleanup") return void ($("info").innerHTML = "");
+  if (!i || special()) return void ($("info").innerHTML = "");
   let html = "";
   const text = i.lastMessage;
   if (text) html += `<div class="block"><div class="label">Last reply</div><div class="box reply" id="reply">${inline(text)}</div></div>`;
@@ -702,7 +717,7 @@ function repoOf(e) {
 
 async function paintChanges(e, fresh = false) {
   const box = $("changes");
-  if (!e || selected === "cleanup") return void (box.hidden = true);
+  if (!e || special()) return void (box.hidden = true);
   box.hidden = false;
   const repo = repoOf(e);
   const head = (sub) => `<div class="changes-head"><h3>Changes</h3><span class="sub">${sub}</span>${repo ? rangesHtml() : ""}</div>`;
@@ -817,7 +832,7 @@ function paint() {
   saveHash();
   paintHeader();
   paintNav();
-  if (selected === "cleanup") return;
+  if (special()) return;
   const e = entry(selected);
   const i = e && e.item;
   // Memory moves a little on every look; only repaint for a change worth showing.
@@ -852,11 +867,11 @@ function select(key) {
     shown = { detail: "", answer: "", info: "", changes: "" };
     $("changes").innerHTML = "";
   }
-  if (key === "cleanup") {
+  if (key === "cleanup" || key === "remote") {
     saveHash();
     paintHeader();
     paintNav();
-    void paintCleanup();
+    void (key === "cleanup" ? paintCleanup() : paintRemote());
   } else paint();
   window.scrollTo(0, 0);
 }
@@ -1019,18 +1034,72 @@ $("main").addEventListener("input", (ev) => {
   if (ev.target.id === "prompt") drafts.set(selected, ev.target.value);
 });
 
-$("cleanup").onclick = () => {
-  if (selected !== "cleanup") return select("cleanup");
-  selected = null; // back to the sessions
-  shown = { detail: "", answer: "", info: "", changes: "" };
-  paint();
-};
+for (const id of ["cleanup", "remote"]) {
+  $(id).onclick = () => {
+    if (selected !== id) return select(id);
+    selected = null; // back to the sessions
+    shown = { detail: "", answer: "", info: "", changes: "" };
+    paint();
+  };
+}
+
+// ------------------------------------------------------------ remote access
+
+async function paintRemote() {
+  $("answer").innerHTML = $("info").innerHTML = "";
+  $("changes").hidden = true;
+  let r;
+  try {
+    r = await api("/api/remote");
+  } catch (e) {
+    $("detail").innerHTML = `<div class="note error">${esc(e.message)}</div>`;
+    return;
+  }
+  if (selected !== "remote") return;
+  let html = `<div class="head"><h2>Remote</h2><div class="meta">${
+    r.origin
+      ? `Open <a href="${esc(r.origin)}" target="_blank" rel="noopener">${esc(r.origin)}</a> on a device you added, and sign in with its passkey.`
+      : "Remote access is off. Start <code class=\"cmd\">agent-diff view --remote https://…</code> behind a Cloudflare Tunnel to use this page from your phone."
+  }</div></div>`;
+  html += `<div class="actions">${mode === "local" && r.origin ? '<button class="btn primary" data-remote="pair">Add a phone</button>' : ""}${mode === "remote" ? '<button class="btn" data-remote="logout">Sign out</button>' : ""}</div><div id="pairing"></div>`;
+  html += `<div class="block"><div class="label">Devices · ${r.devices.length}</div>`;
+  html += r.devices.length
+    ? `<table class="clean"><tr><th>Device</th><th>Added</th><th>Last used</th><th></th></tr>${r.devices
+        .map((d) => `<tr><td>${esc(d.label)}${d.current ? ' <span class="sub">(this one)</span>' : ""}</td><td>${esc(when(d.createdAt))}</td><td>${esc(d.lastUsedAt ? when(d.lastUsedAt) : "")}</td><td><button class="btn small" data-remote="revoke" data-id="${esc(d.id)}">Remove</button></td></tr>`)
+        .join("")}</table>`
+    : `<p class="note">None yet.${mode === "local" && r.origin ? " Add one with the button above, or agent-diff remote pair." : ""}</p>`;
+  html += `</div><div class="block"><div class="label">Done from other devices</div>`;
+  html += r.log.length
+    ? `<ul class="list">${r.log.map((e) => `<li><span class="sub">${esc(when(e.at))}</span> <b>${esc(e.device)}</b> ${esc(e.action)}${e.target ? ` <code class="cmd">${esc(e.target)}</code>` : ""}${e.detail ? `<div class="sub">${esc(e.detail)}</div>` : ""}</li>`).join("")}</ul>`
+    : `<p class="note">Nothing yet.</p>`;
+  $("detail").innerHTML = html + "</div>";
+}
+
+$("main").addEventListener("click", async (ev) => {
+  const b = ev.target.closest("[data-remote]");
+  if (!b) return;
+  try {
+    if (b.dataset.remote === "pair") {
+      const p = await post("/api/remote/pair", {});
+      $("pairing").innerHTML = `<div class="box block pair"><div class="qr">${p.svg}</div><div><p>Scan this with the phone to add, or open the link on it. It works once, until ${esc(new Date(p.expiresAt).toLocaleTimeString())}.</p><code class="cmd">${esc(p.url)}</code> <button class="btn small" data-copy="${esc(p.url)}">Copy</button></div></div>`;
+    } else if (b.dataset.remote === "revoke") {
+      if (!confirm("Remove this device? Its passkey stops working here.")) return;
+      await post("/api/remote/revoke", { id: b.dataset.id });
+      void paintRemote();
+    } else if (b.dataset.remote === "logout") {
+      await fetch("/auth/logout", { method: "POST", headers: { "x-agent-diff": "1" }, credentials: "same-origin" });
+      location.assign("/login");
+    }
+  } catch (e) {
+    $("pairing").innerHTML = `<p class="note error">${esc(e.message)}</p>`;
+  }
+});
 
 setInterval(() => {
-  if (token && !document.hidden) void loadInbox();
+  if ((token || mode === "remote") && !document.hidden) void loadInbox();
 }, 5000);
 
-if (!token) $("main").innerHTML = '<div class="error">Open the full URL that agent-diff printed (it carries the access token).</div>';
+if (!token && mode === "local") $("main").innerHTML = '<div class="error">Open the full URL that agent-diff printed (it carries the access token).</div>';
 else void loadInbox();
 </script>
 </body>

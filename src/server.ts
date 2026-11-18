@@ -1,8 +1,9 @@
 import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { Worker } from "node:worker_threads";
 import { join } from "node:path";
+import { renderSVG } from "uqr";
 import { cleanup } from "./cleanup.ts";
 import { findConflicts } from "./conflicts.ts";
 import { parseSince } from "./core.ts";
@@ -11,13 +12,41 @@ import { focus, herdrAgents, matchPanes, prompt, screen, sendKeys, type HerdrAge
 import { applyHolds, hold, parseUntil, release } from "./holds.ts";
 import { readInbox, type Inbox } from "./inbox.ts";
 import { prStatuses } from "./prs.ts";
+import {
+  audit,
+  authenticationOptions,
+  cookie,
+  cookieNames,
+  createPairing,
+  listPasskeys,
+  loginPage,
+  newSession,
+  pairPage,
+  passkeyLabel,
+  readAudit,
+  readCookie,
+  registrationOptions,
+  remoteConfig,
+  removePasskey,
+  saveOrigin,
+  sessionPasskey,
+  verifyAuthentication,
+  verifyRegistration,
+  type Passkey,
+  type RemoteConfig,
+} from "./remote.ts";
 import type { ViewRequest } from "./view-worker.ts";
 
 /**
- * `agent-diff view`: a local web page over the same data as the CLI: the running sessions, and
- * the changes each one made in its repository. It listens on 127.0.0.1 only,
- * and every API call needs the random token from the printed URL, so other sites open in the
- * browser cannot read the diffs or stage anything.
+ * `agent-diff view`: a web page over the same data as the CLI: the running sessions, and the
+ * changes each one made in its repository.
+ *
+ * Locally it listens on 127.0.0.1, and every API call needs the random token from the printed
+ * URL, so other sites open in the browser cannot read the diffs or act on sessions.
+ *
+ * With `remote`, a second listener (also on 127.0.0.1, for a Cloudflare Tunnel) serves the same
+ * page at a public origin to devices signed in with a passkey (see remote.ts). Everything they
+ * change is logged.
  */
 
 export interface ServeOptions {
@@ -28,6 +57,15 @@ export interface ServeOptions {
   staleAfter?: number;
   /** Use herdr, when sessions run in it (default true). */
   herdr?: boolean;
+  /** Serve signed-in devices at this public origin, on a second local port for the tunnel. */
+  remote?: { origin: string; port: number };
+}
+
+export interface Served {
+  /** The local page, with its token. */
+  url: string;
+  /** The tunnel's local port and the public origin, when remote access is on. */
+  remote?: { origin: string; port: number };
 }
 
 const PAGE = join(import.meta.dirname, "viewer.html");
@@ -105,17 +143,50 @@ function json(res: ServerResponse, status: number, value: unknown): void {
   send(res, status, "application/json; charset=utf-8", JSON.stringify(value));
 }
 
+/** An HTML page whose only script is the one carrying `nonce`, and which no other site may frame. */
+function html(res: ServerResponse, body: string, nonce: string): void {
+  res.setHeader(
+    "content-security-policy",
+    `default-src 'none'; script-src 'nonce-${nonce}'; style-src 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'`,
+  );
+  res.setHeader("x-frame-options", "DENY");
+  res.setHeader("referrer-policy", "no-referrer");
+  send(res, 200, "text/html; charset=utf-8", body);
+}
+
+/** The page, with its script allowed by the nonce and the mode it runs in. */
+function viewerPage(nonce: string, mode: "local" | "remote"): string {
+  return readFileSync(PAGE, "utf8")
+    .replace("<head>", `<head>\n<meta name="agent-diff-mode" content="${mode}">`)
+    .replace("<script>", `<script nonce="${nonce}">`);
+}
+
 async function body(req: IncomingMessage): Promise<Record<string, unknown>> {
   let text = "";
-  for await (const chunk of req) text += chunk;
+  for await (const chunk of req) {
+    text += chunk;
+    if (text.length > 1_000_000) throw new Error("Request too large.");
+  }
   return text ? (JSON.parse(text) as Record<string, unknown>) : {};
 }
 
-export function serve(opts: ServeOptions): Promise<string> {
+function listen(server: Server, port: number): Promise<number> {
+  return new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(port, "127.0.0.1", () => {
+      const address = server.address();
+      resolve(typeof address === "object" && address ? address.port : port);
+    });
+  });
+}
+
+export async function serve(opts: ServeOptions): Promise<Served> {
   const token = randomBytes(16).toString("hex");
   const attribution = attributionWorker();
   // Read the month of transcripts now, so the first look at a session's changes is quick.
   void attribution({ op: "warm", days: opts.days }).catch(() => {});
+  const cfg: RemoteConfig | undefined = opts.remote ? remoteConfig(opts.remote.origin) : undefined;
+  if (cfg) saveOrigin(cfg.origin);
   // Repositories the page may read and stage in: the one it was started in, and those of the
   // sessions it has listed. Never an arbitrary path from the request.
   const known = new Set<string>(opts.root ? [opts.root] : []);
@@ -153,84 +224,187 @@ export function serve(opts: ServeOptions): Promise<string> {
     if (!known.has(repo)) throw new Error("Not a repository of a listed session.");
     return repo;
   };
-  const server = createServer(async (req, res) => {
+
+  /** The API, for the local page and for signed-in devices (`device` set: remote, and logged). */
+  const api = async (req: IncomingMessage, res: ServerResponse, url: URL, device?: Passkey): Promise<void> => {
+    const log = (action: string, target?: string, detail?: string) => {
+      if (device) audit({ device: device.label, action, ...(target && { target }), ...(detail && { detail }) });
+    };
+    if (req.method === "GET" && url.pathname === "/api/inbox") {
+      const inbox = currentInbox();
+      const conflicts = findConflicts(inbox.items, (i) => placeOf(i.cwd).repo);
+      const placed = inbox.items.map((i) => ({ ...i, ...placeOf(i.cwd) }));
+      for (const i of placed) if (i.repo) known.add(i.repo);
+      const items = placed.map((i) => (conflicts[i.key] ? { ...i, conflicts: conflicts[i.key] } : i));
+      const prStatus = prStatuses(items.filter((i) => i.state !== "stale").flatMap((i) => (i.prs ?? []).map((p) => p.url)));
+      const home = opts.root ?? null;
+      return json(res, 200, { ...inbox, items, prStatus, home, homeProject: home ? placeOf(home).project : null });
+    }
+    if (req.method === "GET" && url.pathname === "/api/cleanup") {
+      const inbox = last ?? currentInbox();
+      const projects = new Set<string>();
+      for (const i of inbox.items) {
+        const p = placeOf(i.cwd);
+        if (p.repo) projects.add(p.project);
+      }
+      if (opts.root) projects.add(placeOf(opts.root).project);
+      return json(res, 200, cleanup(inbox, projects));
+    }
+    if (req.method === "POST" && (url.pathname === "/api/hold" || url.pathname === "/api/release")) {
+      const b = await body(req);
+      const inbox = last ?? currentInbox();
+      const item = inbox.items.find((i) => i.key === b["key"]);
+      if (!item) return json(res, 404, { error: "That session is no longer listed." });
+      if (url.pathname === "/api/release") {
+        log("release", item.key);
+        return json(res, 200, { released: release(item.key) });
+      }
+      const kind = b["kind"] === "later" ? "later" : "done";
+      const until = kind === "later" ? (typeof b["until"] === "number" ? b["until"] : parseUntil(String(b["until"] ?? "1h"))) : undefined;
+      log(kind, item.key);
+      return json(res, 200, { hold: hold(item, kind, until) });
+    }
+    if (url.pathname.startsWith("/api/herdr/")) {
+      const action = url.pathname.slice("/api/herdr/".length);
+      if (req.method === "GET" && action === "screen") return json(res, 200, { text: await screen(paneOf(url.searchParams.get("key"))) });
+      if (req.method !== "POST") return json(res, 404, { error: "Not found" });
+      const b = await body(req);
+      const pane = paneOf(b["key"]);
+      if (action === "focus") {
+        log("focus", String(b["key"]));
+        return json(res, 200, { ok: true, result: await focus(pane) });
+      }
+      if (action === "prompt") {
+        const text = String(b["text"] ?? "").trim();
+        if (!text || text.length > 20_000) throw new Error("Write a prompt (up to 20,000 characters).");
+        log("prompt", String(b["key"]), text);
+        return json(res, 200, { ok: true, result: await prompt(pane, text) });
+      }
+      if (action === "keys") {
+        const keys = Array.isArray(b["keys"]) ? b["keys"].map(String) : [];
+        const result = await sendKeys(pane, keys);
+        log("keys", String(b["key"]), keys.join(" "));
+        return json(res, 200, { ok: true, result });
+      }
+      return json(res, 404, { error: "Not found" });
+    }
+    if (req.method === "GET" && url.pathname === "/api/view") {
+      // Started outside a repository and no session picked: there are no changes to show.
+      if (!opts.root && !url.searchParams.get("repo")) return json(res, 200, { root: null });
+      return json(res, 200, await attribution({ op: "view", root: repoParam(url), days: opts.days, ...rangeOf(url) }));
+    }
+    if (req.method === "POST" && url.pathname === "/api/stage") {
+      const repo = repoParam(url);
+      const b = await body(req);
+      const apply = b["apply"] === true;
+      if (apply) log("stage", String(b["session"] ?? ""), repo);
+      return json(res, 200, await attribution({ op: "stage", root: repo, days: opts.days, ...rangeOf(url), session: String(b["session"] ?? ""), apply }));
+    }
+    if (req.method === "GET" && url.pathname === "/api/remote") {
+      const devices = listPasskeys().map(({ id, label, createdAt, lastUsedAt }) => ({ id, label, createdAt, lastUsedAt, current: device?.id === id }));
+      return json(res, 200, { origin: cfg?.origin ?? null, devices, log: readAudit(40), remote: !!device });
+    }
+    if (req.method === "POST" && url.pathname === "/api/remote/pair") {
+      // Devices are added from this computer only: a device that is signed in cannot add others.
+      if (device) return json(res, 403, { error: "Pair new devices from your computer." });
+      if (!cfg) return json(res, 400, { error: "Remote access is off: start agent-diff view with --remote <origin>." });
+      const pairing = createPairing(cfg.origin);
+      return json(res, 200, { ...pairing, svg: renderSVG(pairing.url, { border: 2 }) });
+    }
+    if (req.method === "POST" && url.pathname === "/api/remote/revoke") {
+      const b = await body(req);
+      const gone = removePasskey(String(b["id"] ?? ""));
+      if (!gone) return json(res, 404, { error: "No such device." });
+      log("remove device", gone.label);
+      return json(res, 200, { removed: gone.label });
+    }
+    return json(res, 404, { error: "Not found" });
+  };
+
+  const local = createServer(async (req, res) => {
     try {
       const url = new URL(req.url ?? "/", "http://localhost");
       // A page on another site can point a DNS name at 127.0.0.1; only accept our own host names.
       const host = (req.headers.host ?? "").replace(/:\d+$/, "");
       if (host !== "127.0.0.1" && host !== "localhost") return send(res, 403, "text/plain", "Forbidden host");
-
       if (req.method === "GET" && url.pathname === "/") {
-        return send(res, 200, "text/html; charset=utf-8", readFileSync(PAGE, "utf8"));
+        const nonce = randomBytes(16).toString("base64");
+        return html(res, viewerPage(nonce, "local"), nonce);
       }
       if (req.headers["x-token"] !== token) return json(res, 403, { error: "Open the URL agent-diff view printed (it carries the access token)." });
+      return await api(req, res, url);
+    } catch (e) {
+      return json(res, 400, { error: (e as Error).message });
+    }
+  });
+  const port = await listen(local, opts.port);
+  const served: Served = { url: `http://127.0.0.1:${port}/#t=${token}` };
+  if (!cfg || !opts.remote) return served;
 
-      if (req.method === "GET" && url.pathname === "/api/inbox") {
-        const inbox = currentInbox();
-        const conflicts = findConflicts(inbox.items, (i) => placeOf(i.cwd).repo);
-        const placed = inbox.items.map((i) => ({ ...i, ...placeOf(i.cwd) }));
-        for (const i of placed) if (i.repo) known.add(i.repo);
-        const items = placed.map((i) => (conflicts[i.key] ? { ...i, conflicts: conflicts[i.key] } : i));
-        const prStatus = prStatuses(items.filter((i) => i.state !== "stale").flatMap((i) => (i.prs ?? []).map((p) => p.url)));
-        const home = opts.root ?? null;
-        return json(res, 200, { ...inbox, items, prStatus, home, homeProject: home ? placeOf(home).project : null });
-      }
-      if (req.method === "GET" && url.pathname === "/api/cleanup") {
-        const inbox = last ?? currentInbox();
-        const projects = new Set<string>();
-        for (const i of inbox.items) {
-          const p = placeOf(i.cwd);
-          if (p.repo) projects.add(p.project);
-        }
-        if (opts.root) projects.add(placeOf(opts.root).project);
-        return json(res, 200, cleanup(inbox, projects));
-      }
-      if (req.method === "POST" && (url.pathname === "/api/hold" || url.pathname === "/api/release")) {
+  const names = cookieNames(cfg);
+  const remote = createServer(async (req, res) => {
+    try {
+      // Only requests for the public origin, which the tunnel forwards with their Host intact.
+      if (req.headers.host !== cfg.host) return send(res, 403, "text/plain", "Forbidden host");
+      const url = new URL(req.url ?? "/", cfg.origin);
+      const nonce = randomBytes(16).toString("base64");
+      const device = sessionPasskey(readCookie(req.headers.cookie, names.session));
+      // Requests that change something must come from our own page: same origin and our header,
+      // which a form or another site's script cannot send without CORS (never granted here).
+      const fromPage = req.headers["x-agent-diff"] === "1" && (req.method === "GET" || req.headers.origin === cfg.origin);
+
+      if (req.method === "GET" && url.pathname === "/login") return html(res, loginPage(nonce), nonce);
+      const pair = /^\/pair\/([A-Za-z0-9_-]{20,})$/.exec(url.pathname);
+      if (req.method === "GET" && pair) return html(res, pairPage(nonce, pair[1]!, passkeyLabel(req.headers["user-agent"])), nonce);
+      if (url.pathname.startsWith("/auth/")) {
+        if (req.method !== "POST" || !fromPage) return json(res, 403, { error: "Not from this page." });
+        const ceremony = readCookie(req.headers.cookie, names.ceremony);
         const b = await body(req);
-        const inbox = last ?? currentInbox();
-        const item = inbox.items.find((i) => i.key === b["key"]);
-        if (!item) return json(res, 404, { error: "That session is no longer listed." });
-        if (url.pathname === "/api/release") return json(res, 200, { released: release(item.key) });
-        const kind = b["kind"] === "later" ? "later" : "done";
-        const until = kind === "later" ? (typeof b["until"] === "number" ? b["until"] : parseUntil(String(b["until"] ?? "1h"))) : undefined;
-        return json(res, 200, { hold: hold(item, kind, until) });
-      }
-      if (url.pathname.startsWith("/api/herdr/")) {
-        const action = url.pathname.slice("/api/herdr/".length);
-        if (req.method === "GET" && action === "screen") return json(res, 200, { text: await screen(paneOf(url.searchParams.get("key"))) });
-        if (req.method !== "POST") return json(res, 404, { error: "Not found" });
-        const b = await body(req);
-        const pane = paneOf(b["key"]);
-        if (action === "focus") return json(res, 200, { ok: true, result: await focus(pane) });
-        if (action === "prompt") {
-          const text = String(b["text"] ?? "").trim();
-          if (!text || text.length > 20_000) throw new Error("Write a prompt (up to 20,000 characters).");
-          return json(res, 200, { ok: true, result: await prompt(pane, text) });
+        const signIn = (p: Passkey, action: string) => {
+          const s = newSession(p);
+          res.setHeader("set-cookie", [cookie(cfg, names.session, s.value, s.maxAge), cookie(cfg, names.ceremony, "", 0)]);
+          audit({ device: p.label, action });
+          return json(res, 200, { ok: true });
+        };
+        switch (url.pathname) {
+          case "/auth/login/options": {
+            const o = await authenticationOptions(cfg);
+            res.setHeader("set-cookie", cookie(cfg, names.ceremony, o.ceremony, 300));
+            return json(res, 200, o.options);
+          }
+          case "/auth/login/verify":
+            return signIn(await verifyAuthentication(cfg, ceremony, b["response"] as never), "signed in");
+          case "/auth/register/options": {
+            const o = await registrationOptions(cfg, String(b["pairing"] ?? ""), String(b["label"] ?? "") || passkeyLabel(req.headers["user-agent"]));
+            res.setHeader("set-cookie", cookie(cfg, names.ceremony, o.ceremony, 300));
+            return json(res, 200, o.options);
+          }
+          case "/auth/register/verify":
+            return signIn(await verifyRegistration(cfg, ceremony, b["response"] as never), "paired this device");
+          case "/auth/logout":
+            res.setHeader("set-cookie", cookie(cfg, names.session, "", 0));
+            if (device) audit({ device: device.label, action: "signed out" });
+            return json(res, 200, { ok: true });
         }
-        if (action === "keys") return json(res, 200, { ok: true, result: await sendKeys(pane, Array.isArray(b["keys"]) ? b["keys"].map(String) : []) });
         return json(res, 404, { error: "Not found" });
       }
-      if (req.method === "GET" && url.pathname === "/api/view") {
-        // Started outside a repository and no session picked: there are no changes to show.
-        if (!opts.root && !url.searchParams.get("repo")) return json(res, 200, { root: null });
-        return json(res, 200, await attribution({ op: "view", root: repoParam(url), days: opts.days, ...rangeOf(url) }));
+      if (req.method === "GET" && url.pathname === "/") {
+        if (!device) {
+          res.writeHead(302, { location: "/login", "cache-control": "no-store" });
+          return void res.end();
+        }
+        return html(res, viewerPage(nonce, "remote"), nonce);
       }
-      if (req.method === "POST" && url.pathname === "/api/stage") {
-        const repo = repoParam(url);
-        const b = await body(req);
-        return json(res, 200, await attribution({ op: "stage", root: repo, days: opts.days, ...rangeOf(url), session: String(b["session"] ?? ""), apply: b["apply"] === true }));
+      if (url.pathname.startsWith("/api/")) {
+        if (!device) return json(res, 401, { error: "Sign in again.", login: "/login" });
+        if (!fromPage) return json(res, 403, { error: "Not from this page." });
+        return await api(req, res, url, device);
       }
       return json(res, 404, { error: "Not found" });
     } catch (e) {
       return json(res, 400, { error: (e as Error).message });
     }
   });
-  return new Promise((resolve, reject) => {
-    server.once("error", reject);
-    server.listen(opts.port, "127.0.0.1", () => {
-      const address = server.address();
-      const port = typeof address === "object" && address ? address.port : opts.port;
-      resolve(`http://127.0.0.1:${port}/#t=${token}`);
-    });
-  });
+  served.remote = { origin: cfg.origin, port: await listen(remote, opts.remote.port) };
+  return served;
 }
