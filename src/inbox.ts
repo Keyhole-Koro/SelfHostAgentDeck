@@ -1,0 +1,1002 @@
+import { closeSync, existsSync, openSync, readdirSync, readFileSync, readSync, statSync } from "node:fs";
+import { homedir } from "node:os";
+import { isAbsolute, join, resolve } from "node:path";
+import { sessionKey, type Agent } from "./types.ts";
+
+/**
+ * `agent-diff inbox`: the running Claude Code and Codex sessions that wait on you, across every
+ * repository, on one screen.
+ *
+ * Claude Code keeps a record per running process in ~/.claude/sessions/<pid>.json with a status
+ * (busy / idle / waiting) and, while waiting, what for ("approve Bash: npm test", "input needed").
+ * Background sessions also have ~/.claude/jobs/<id>/state.json, which says when one is blocked and
+ * what it needs, even while no process runs. These files are Claude Code's own and undocumented,
+ * so everything here is read defensively.
+ *
+ * Transcripts add the rest: the session's title, your last prompt, the recap Claude Code writes
+ * while you are away, the last reply, unanswered questions, its task list, background commands
+ * still running, pull requests it opened and how full its context is. They are read
+ * incrementally: the first look reads the last few MB, later looks only what was appended.
+ *
+ * Codex holds ~/.codex/thread-writer-locks/<thread>.lock while a thread is loaded; the rollout
+ * says whether a turn is running, the last reply, the context used and the account's rate limits.
+ * Codex does not log approval prompts; a command that has been running a while without output is
+ * reported as one that may be waiting for approval.
+ */
+
+export type InboxState = "needs-answer" | "your-turn" | "working" | "stale";
+
+export interface InboxQuestion {
+  question: string;
+  options: string[];
+}
+
+export interface InboxTask {
+  id: string;
+  subject: string;
+  /** pending, in_progress or completed. */
+  status: string;
+  activeForm?: string;
+}
+
+export interface InboxBackground {
+  id: string;
+  kind: "command" | "monitor";
+  /** The command's description, or the command itself. */
+  command: string;
+  since: number;
+}
+
+export interface InboxPr {
+  url: string;
+  number: number;
+  repo: string;
+}
+
+export interface InboxContext {
+  /** Tokens the last request sent (the context in use); unknown right after a compaction. */
+  tokens?: number;
+  /** The model's context window, when the agent records it (Codex). */
+  window?: number;
+  /** How often the conversation was compacted, and at how many tokens the last time. */
+  compactions: number;
+  lastCompactTokens?: number;
+}
+
+export interface InboxTerminal {
+  herdrPane: string;
+  herdrSocket: string;
+}
+
+export interface InboxItem {
+  key: string;
+  agent: Agent;
+  id: string;
+  /** Claude Code's session name, or the Codex thread name. */
+  name: string;
+  /** What the session works on (Claude Code's title for it). */
+  title?: string;
+  cwd: string | undefined;
+  state: InboxState;
+  /** What the session waits for: "approve Bash: npm test", "input needed", "interrupted". */
+  reason?: string;
+  /** Unanswered AskUserQuestion questions. */
+  questions?: InboxQuestion[];
+  /** The session's last reply. */
+  lastMessage?: string;
+  /** The last reply ends with a question. */
+  asks?: boolean;
+  /** Your last prompt to it. */
+  lastPrompt?: string;
+  /** Claude Code's recap of the turn, written while you were away (only if you have not replied since). */
+  awaySummary?: string;
+  tasks?: InboxTask[];
+  /** Background commands and monitors still running. */
+  background?: InboxBackground[];
+  prs?: InboxPr[];
+  context?: InboxContext;
+  /** Codex: a command the turn is still waiting on. */
+  inFlight?: { command: string; since: number };
+  /** Resident memory of the process, in bytes (Linux). */
+  memory?: number;
+  /** When the session entered this state, as far as known (ms). */
+  since: number;
+  pid?: number;
+  /** Claude Code: "interactive" or "bg". */
+  kind?: string;
+  /** Claude Code background session id (for `claude attach`). */
+  jobId?: string;
+  /** Where the session runs, when a terminal multiplexer says so. */
+  terminal?: InboxTerminal;
+  /** How to get back to the session. */
+  resume: string;
+  /** Put off with "Later" or "Done" (see holds.ts) until the session moves on. */
+  hold?: { kind: "later" | "done"; until?: number };
+}
+
+export interface RateWindow {
+  usedPercent: number;
+  windowMinutes: number;
+  resetsAt: number; // ms
+}
+
+export interface CodexLimits {
+  primary?: RateWindow;
+  secondary?: RateWindow;
+  at: number;
+}
+
+export interface Inbox {
+  generatedAt: number;
+  /** "your-turn" sessions untouched for longer than this are "stale" (ms). */
+  staleAfter: number;
+  items: InboxItem[];
+  codexLimits?: CodexLimits;
+}
+
+export interface InboxOptions {
+  now?: number;
+  staleAfter?: number;
+  claudeHome?: string;
+  codexHome?: string;
+  /** Skip Claude transcripts (states and reasons only): for status lines, which must be quick. */
+  light?: boolean;
+}
+
+const DAY = 864e5;
+const MAX_MESSAGE = 4000;
+const MAX_PROMPT = 1000;
+/** Pull requests listed per session (the most recent). */
+const MAX_PRS = 6;
+/** How far back the first look at a transcript goes. */
+const FIRST_READ = 2 * 1024 * 1024;
+/** A Codex command running this long without output may be waiting for approval. */
+const APPROVAL_AFTER = 30_000;
+
+export function claudeHome(): string {
+  return process.env["CLAUDE_CONFIG_DIR"] || join(homedir(), ".claude");
+}
+
+export function codexHome(): string {
+  return process.env["CODEX_HOME"] || join(homedir(), ".codex");
+}
+
+const STATE_ORDER: Record<InboxState, number> = { "needs-answer": 0, "your-turn": 1, working: 2, stale: 3 };
+
+export function readInbox(opts: InboxOptions = {}): Inbox {
+  const now = opts.now ?? Date.now();
+  const staleAfter = opts.staleAfter ?? DAY;
+  const claude = claudeItems(opts.claudeHome ?? claudeHome(), now, staleAfter, !!opts.light);
+  const codex = codexItems(opts.codexHome ?? codexHome(), now);
+  const items = [...claude, ...codex.items];
+  for (const item of items) {
+    if (item.state === "your-turn" && now - item.since > staleAfter) item.state = "stale";
+    if (item.lastMessage && (item.state === "your-turn" || item.state === "stale") && endsWithQuestion(item.lastMessage)) item.asks = true;
+  }
+  items.sort((a, b) => STATE_ORDER[a.state] - STATE_ORDER[b.state] || b.since - a.since);
+  const inbox: Inbox = { generatedAt: now, staleAfter, items };
+  if (codex.limits) inbox.codexLimits = codex.limits;
+  return inbox;
+}
+
+/**
+ * Whether a reply ends by asking something: its last paragraph has a question mark, or a Japanese
+ * question that ends in "か。" ("A はこのまま消してよいですか。B は…").
+ */
+export function endsWithQuestion(text: string): boolean {
+  const last = text.trim().split(/\n\s*\n/).pop() ?? "";
+  return /[?？]/.test(last) || /(です|ます|でしょう|ましょう|よい|いい|良い)か[。．]/.test(last);
+}
+
+function clip(text: string, max = MAX_MESSAGE): string {
+  const t = text.trim();
+  return t.length > max ? "…" + t.slice(-max) : t;
+}
+
+function head(text: string, max = MAX_PROMPT): string {
+  const t = text.trim();
+  return t.length > max ? t.slice(0, max) + "…" : t;
+}
+
+// ---------------------------------------------------------------- incremental reading
+
+interface Cursor<S> {
+  pos: number;
+  ino: number;
+  /** The first chunk started mid-file: its first line is partial. */
+  skipFirst: boolean;
+  state: S;
+}
+
+/**
+ * Feeds the complete lines appended to `file` since the last call to `feed`, and returns the
+ * state they built. The first call starts `firstRead` bytes before the end.
+ */
+function follow<S>(cache: Map<string, Cursor<S>>, file: string, init: () => S, feed: (state: S, line: string) => void, firstRead = FIRST_READ): S | undefined {
+  let size: number;
+  let ino: number;
+  try {
+    ({ size, ino } = statSync(file));
+  } catch {
+    cache.delete(file);
+    return undefined;
+  }
+  let c = cache.get(file);
+  if (!c || size < c.pos || ino !== c.ino) {
+    const pos = Math.max(0, size - firstRead);
+    c = { pos, ino, skipFirst: pos > 0, state: init() };
+    cache.set(file, c);
+  }
+  if (size <= c.pos) return c.state;
+  let fd: number | undefined;
+  try {
+    fd = openSync(file, "r");
+    const buf = Buffer.alloc(size - c.pos);
+    const n = readSync(fd, buf, 0, buf.length, c.pos);
+    const end = buf.subarray(0, n).lastIndexOf(10);
+    if (end < 0) return c.state; // no complete line yet
+    const lines = buf.toString("utf8", 0, end).split("\n");
+    if (c.skipFirst) lines.shift();
+    c.skipFirst = false;
+    c.pos += end + 1;
+    for (const line of lines) if (line) feed(c.state, line);
+  } catch {
+    // unreadable right now; try again next time
+  } finally {
+    if (fd !== undefined) closeSync(fd);
+  }
+  return c.state;
+}
+
+// ---------------------------------------------------------------- Claude Code
+
+interface ClaudeRecord {
+  pid?: number;
+  sessionId?: string;
+  cwd?: string;
+  name?: string;
+  kind?: string;
+  status?: string;
+  waitingFor?: string;
+  statusUpdatedAt?: number;
+  updatedAt?: number;
+  startedAt?: number;
+  procStart?: string;
+  spare?: boolean;
+}
+
+interface JobState {
+  state?: string;
+  detail?: string;
+  needs?: string;
+  name?: string;
+  sessionId?: string;
+  cwd?: string;
+  createdAt?: string;
+  updatedAt?: string;
+  daemonShort?: string;
+  children?: { href?: string; kind?: string }[] | null;
+}
+
+/** Whether `pid` is still the process that wrote the record (pids are reused). */
+function alive(pid: number, procStart: string | undefined): boolean {
+  try {
+    process.kill(pid, 0);
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code !== "EPERM") return false;
+  }
+  if (procStart && process.platform === "linux") {
+    try {
+      const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
+      // Field 22 is the start time; fields after the ")" of the command name start at field 3.
+      return stat.slice(stat.lastIndexOf(")") + 2).split(" ")[19] === procStart;
+    } catch {
+      return true;
+    }
+  }
+  return true;
+}
+
+/** Resident memory of a process in bytes (Linux only). */
+function memoryOf(pid: number): number | undefined {
+  try {
+    const kb = /VmRSS:\s+(\d+)\s+kB/.exec(readFileSync(`/proc/${pid}/status`, "utf8"))?.[1];
+    return kb ? Number(kb) * 1024 : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** The herdr pane a process runs in, from its environment (Linux only). */
+export function terminalOf(pid: number): InboxTerminal | undefined {
+  try {
+    const env = readFileSync(`/proc/${pid}/environ`, "utf8").split("\0");
+    const get = (k: string) => env.find((e) => e.startsWith(k + "="))?.slice(k.length + 1);
+    const herdrPane = get("HERDR_PANE_ID");
+    const herdrSocket = get("HERDR_SOCKET_PATH");
+    return herdrPane && herdrSocket ? { herdrPane, herdrSocket } : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+const transcriptCache = new Map<string, string>();
+
+function claudeTranscript(home: string, sessionId: string): string | undefined {
+  const key = `${home}\0${sessionId}`;
+  const cached = transcriptCache.get(key);
+  if (cached && existsSync(cached)) return cached;
+  const root = join(home, "projects");
+  let dirs: string[];
+  try {
+    dirs = readdirSync(root);
+  } catch {
+    return undefined;
+  }
+  for (const dir of dirs) {
+    const file = join(root, dir, `${sessionId}.jsonl`);
+    if (existsSync(file)) {
+      transcriptCache.set(key, file);
+      return file;
+    }
+  }
+  return undefined;
+}
+
+/** The latest title in the last 64 KB of a transcript (Claude Code repeats it every turn). */
+function quickTitle(file: string): string | undefined {
+  let fd: number | undefined;
+  try {
+    fd = openSync(file, "r");
+    const size = statSync(file).size;
+    const len = Math.min(size, 64 * 1024);
+    const buf = Buffer.alloc(len);
+    readSync(fd, buf, 0, len, size - len);
+    const text = buf.toString("utf8");
+    const at = text.lastIndexOf('"aiTitle":"');
+    if (at < 0) return undefined;
+    const m = /^"aiTitle":("(?:[^"\\]|\\.)*")/.exec(text.slice(at));
+    return m ? (JSON.parse(m[1]!) as string) : undefined;
+  } catch {
+    return undefined;
+  } finally {
+    if (fd !== undefined) closeSync(fd);
+  }
+}
+
+interface Block {
+  type?: string;
+  text?: string;
+  id?: string;
+  name?: string;
+  input?: Record<string, unknown>;
+  tool_use_id?: string;
+}
+
+interface ClaudeLine {
+  type?: string;
+  cwd?: string;
+  subtype?: string;
+  isSidechain?: boolean;
+  isMeta?: boolean;
+  timestamp?: string;
+  aiTitle?: string;
+  agentName?: string;
+  lastPrompt?: string;
+  content?: unknown;
+  prNumber?: number | string;
+  prUrl?: string;
+  prRepository?: string;
+  compactMetadata?: { preTokens?: number };
+  toolUseResult?: Record<string, unknown>;
+  message?: { content?: unknown; usage?: Record<string, number> };
+}
+
+/** What a Claude transcript says so far. */
+interface ClaudeAcc {
+  lastMessage?: string;
+  /** Tool calls still without a result, by id. */
+  pending: Map<string, Block>;
+  title?: string;
+  agentName?: string;
+  lastPrompt?: string;
+  awaySummary?: string;
+  prs: Map<string, InboxPr>;
+  tasks: Map<string, InboxTask>;
+  /** TaskCreate calls waiting for the id their result assigns. */
+  creates: Map<string, { subject: string; activeForm?: string }>;
+  /** Background commands waiting for the id their result assigns. */
+  starting: Map<string, Omit<InboxBackground, "id">>;
+  background: Map<string, InboxBackground>;
+  tokens?: number;
+  compactions: number;
+  lastCompactTokens?: number;
+  /** Files the session wrote with its edit tools (absolute path → when). */
+  edited: Map<string, number>;
+}
+
+const claudeCursors = new Map<string, Cursor<ClaudeAcc>>();
+
+const newClaudeAcc = (): ClaudeAcc => ({ pending: new Map(), prs: new Map(), tasks: new Map(), creates: new Map(), starting: new Map(), background: new Map(), compactions: 0, edited: new Map() });
+
+/**
+ * The files a session wrote, for spotting files two sessions share (conflicts.ts). Kept off the
+ * item's enumerable fields: it can be long, and the page does not need it.
+ */
+export function editedFiles(item: InboxItem): Map<string, number> {
+  return (item as InboxItem & { [EDITED]?: Map<string, number> })[EDITED] ?? new Map();
+}
+const EDITED = Symbol("edited");
+function setEdited(item: InboxItem, files: Map<string, number>): void {
+  Object.defineProperty(item, EDITED, { value: files, enumerable: false });
+}
+
+/** Lines worth parsing: most of a transcript is tool output, file snapshots and request records. */
+const CLAUDE_TYPES = /"type":"(assistant|user|ai-title|agent-name|last-prompt|system|pr-link|queue-operation)"/;
+
+/** Prompts you typed, as opposed to harness text (command wrappers, notifications, reminders). */
+function promptText(content: unknown): string | undefined {
+  const text = typeof content === "string" ? content : Array.isArray(content) ? (content as Block[]).filter((b) => b?.type === "text").map((b) => b.text ?? "").join("\n") : undefined;
+  const t = text?.trim();
+  if (!t || t.startsWith("<") || t.startsWith("[Request interrupted")) return undefined;
+  return t;
+}
+
+/** Ends background tasks named in a <task-notification> (they completed, failed or were stopped). */
+function finishTasks(acc: ClaudeAcc, text: string): void {
+  for (const m of text.matchAll(/<task-id>([^<]+)<\/task-id>/g)) acc.background.delete(m[1]!.trim());
+}
+
+function feedClaude(acc: ClaudeAcc, raw: string): void {
+  // The "type" key can come after the message itself, tens of KB into the line.
+  if (!CLAUDE_TYPES.test(raw)) return;
+  let line: ClaudeLine;
+  try {
+    line = JSON.parse(raw) as ClaudeLine;
+  } catch {
+    return;
+  }
+  if (line.isSidechain) return;
+  const at = line.timestamp ? Date.parse(line.timestamp) : Date.now();
+  switch (line.type) {
+    case "ai-title":
+      if (line.aiTitle) acc.title = line.aiTitle;
+      return;
+    case "agent-name":
+      if (line.agentName) acc.agentName = line.agentName;
+      return;
+    case "last-prompt":
+      if (line.lastPrompt && head(line.lastPrompt) !== acc.lastPrompt) {
+        acc.lastPrompt = head(line.lastPrompt);
+        acc.awaySummary = undefined; // a new prompt: the recap was of the turn before it
+      }
+      return;
+    case "pr-link":
+      if (line.prUrl) acc.prs.set(line.prUrl, { url: line.prUrl, number: Number(line.prNumber) || 0, repo: line.prRepository ?? "" });
+      return;
+    case "queue-operation":
+      if (typeof line.content === "string" && line.content.includes("<task-notification>")) finishTasks(acc, line.content);
+      return;
+    case "system":
+      if (line.subtype === "away_summary" && typeof line.content === "string") acc.awaySummary = line.content.trim();
+      if (line.subtype === "compact_boundary") {
+        acc.compactions++;
+        if (line.compactMetadata?.preTokens) acc.lastCompactTokens = line.compactMetadata.preTokens;
+        acc.tokens = undefined; // the next request tells the size after compaction
+      }
+      return;
+    case "user": {
+      const content = line.message?.content;
+      const text = typeof content === "string" ? content : "";
+      if (text.includes("<task-notification>")) finishTasks(acc, text);
+      if (Array.isArray(content)) {
+        for (const b of content as Block[]) {
+          if (b?.type === "text" && b.text?.includes("<task-notification>")) finishTasks(acc, b.text);
+          if (b?.type !== "tool_result" || !b.tool_use_id) continue;
+          acc.pending.delete(b.tool_use_id);
+          const result = line.toolUseResult ?? {};
+          const create = acc.creates.get(b.tool_use_id);
+          if (create) {
+            acc.creates.delete(b.tool_use_id);
+            const id = (result["task"] as { id?: unknown } | undefined)?.id;
+            if (id !== undefined) acc.tasks.set(String(id), { id: String(id), status: "pending", ...create });
+          }
+          const start = acc.starting.get(b.tool_use_id);
+          if (start) {
+            acc.starting.delete(b.tool_use_id);
+            const id = result["backgroundTaskId"] ?? result["taskId"];
+            if (typeof id === "string") acc.background.set(id, { id, ...start });
+          }
+        }
+      }
+      if (!line.isMeta && promptText(content)) acc.awaySummary = undefined;
+      return;
+    }
+    case "assistant": {
+      const content = line.message?.content;
+      if (!Array.isArray(content)) return;
+      for (const b of content as Block[]) {
+        if (b?.type === "text" && b.text?.trim()) acc.lastMessage = b.text;
+        if (b?.type !== "tool_use" || !b.id) continue;
+        acc.pending.set(b.id, b);
+        const input = b.input ?? {};
+        const str = (v: unknown) => (typeof v === "string" ? v : "");
+        switch (b.name) {
+          case "Edit":
+          case "MultiEdit":
+          case "Write":
+          case "NotebookEdit": {
+            const p = str(input["file_path"]) || str(input["notebook_path"]);
+            if (p) acc.edited.set(isAbsolute(p) ? p : resolve(line.cwd ?? "/", p), at);
+            break;
+          }
+          case "TaskCreate":
+            acc.creates.set(b.id, { subject: str(input["subject"]) || "(task)", ...(str(input["activeForm"]) && { activeForm: str(input["activeForm"]) }) });
+            break;
+          case "TaskUpdate": {
+            const id = String(input["taskId"] ?? "");
+            const task = acc.tasks.get(id) ?? { id, subject: `#${id}`, status: "pending" };
+            if (input["status"] === "deleted") acc.tasks.delete(id);
+            else {
+              if (str(input["status"])) task.status = str(input["status"]);
+              if (str(input["subject"])) task.subject = str(input["subject"]);
+              if (str(input["activeForm"])) task.activeForm = str(input["activeForm"]);
+              acc.tasks.set(id, task);
+            }
+            break;
+          }
+          case "TodoWrite": {
+            const todos = Array.isArray(input["todos"]) ? (input["todos"] as Record<string, unknown>[]) : [];
+            acc.tasks = new Map(todos.map((t, i) => [String(i + 1), { id: String(i + 1), subject: str(t["content"]) || "(task)", status: str(t["status"]) || "pending", ...(str(t["activeForm"]) && { activeForm: str(t["activeForm"]) }) }]));
+            break;
+          }
+          case "Bash":
+            if (input["run_in_background"] === true) acc.starting.set(b.id, { kind: "command", command: str(input["description"]) || str(input["command"]), since: at });
+            break;
+          case "Monitor":
+            acc.starting.set(b.id, { kind: "monitor", command: str(input["description"]) || str(input["command"]), since: at });
+            break;
+          case "TaskStop":
+            acc.background.delete(str(input["task_id"]));
+            break;
+        }
+      }
+      const u = line.message?.usage;
+      if (u) acc.tokens = (u["input_tokens"] ?? 0) + (u["cache_creation_input_tokens"] ?? 0) + (u["cache_read_input_tokens"] ?? 0);
+      return;
+    }
+  }
+}
+
+function questionsOf(block: Block): InboxQuestion[] {
+  const qs = Array.isArray(block.input?.["questions"]) ? (block.input["questions"] as Record<string, unknown>[]) : [];
+  return qs
+    .filter((q) => typeof q?.["question"] === "string")
+    .map((q) => ({
+      question: q["question"] as string,
+      options: (Array.isArray(q["options"]) ? (q["options"] as Record<string, unknown>[]) : []).map((o) => String(o?.["label"] ?? "")).filter(Boolean),
+    }));
+}
+
+/** Adds what the transcript says to an item. */
+function fromTranscript(item: InboxItem, acc: ClaudeAcc): void {
+  setEdited(item, acc.edited);
+  if (acc.title) item.title = acc.title;
+  if (acc.lastMessage) item.lastMessage = clip(acc.lastMessage);
+  if (acc.lastPrompt) item.lastPrompt = acc.lastPrompt;
+  if (acc.awaySummary && item.state !== "working") item.awaySummary = acc.awaySummary;
+  if (acc.tasks.size) item.tasks = [...acc.tasks.values()];
+  if (acc.background.size) item.background = [...acc.background.values()];
+  if (acc.prs.size) item.prs = [...acc.prs.values()].slice(-MAX_PRS);
+  if (acc.tokens !== undefined || acc.compactions) {
+    item.context = { compactions: acc.compactions };
+    if (acc.tokens !== undefined) item.context.tokens = acc.tokens;
+    if (acc.lastCompactTokens) item.context.lastCompactTokens = acc.lastCompactTokens;
+  }
+  if (item.state === "needs-answer") {
+    const asks = [...acc.pending.values()].filter((b) => b.name === "AskUserQuestion").flatMap(questionsOf);
+    if (asks.length) item.questions = asks;
+  }
+}
+
+function readJobs(home: string): Map<string, JobState & { short: string }> {
+  const jobs = new Map<string, JobState & { short: string }>();
+  const dir = join(home, "jobs");
+  let names: string[];
+  try {
+    names = readdirSync(dir);
+  } catch {
+    return jobs;
+  }
+  for (const short of names) {
+    try {
+      const job = JSON.parse(readFileSync(join(dir, short, "state.json"), "utf8")) as JobState;
+      if (job.sessionId) jobs.set(job.sessionId, { ...job, short: job.daemonShort ?? short });
+    } catch {
+      // not a job folder, or being rewritten
+    }
+  }
+  return jobs;
+}
+
+function jobPrs(job: JobState): InboxPr[] {
+  return (job.children ?? [])
+    .filter((c) => c?.kind === "pr" && typeof c.href === "string")
+    .map((c) => {
+      const m = /github\.com\/([^/]+\/[^/]+)\/pull\/(\d+)/.exec(c.href!);
+      return { url: c.href!, number: m ? Number(m[2]) : 0, repo: m?.[1] ?? "" };
+    });
+}
+
+function claudeItems(home: string, now: number, staleAfter: number, light: boolean): InboxItem[] {
+  const items: InboxItem[] = [];
+  const jobs = readJobs(home);
+  const seen = new Set<string>();
+  const dir = join(home, "sessions");
+  let files: string[] = [];
+  try {
+    files = readdirSync(dir).filter((f) => /^\d+\.json$/.test(f));
+  } catch {
+    // no running sessions
+  }
+  for (const f of files) {
+    let r: ClaudeRecord;
+    try {
+      r = JSON.parse(readFileSync(join(dir, f), "utf8")) as ClaudeRecord;
+    } catch {
+      continue; // being rewritten
+    }
+    const pid = r.pid ?? Number(f.split(".")[0]);
+    if (!r.sessionId || r.spare || seen.has(r.sessionId) || !alive(pid, r.procStart)) continue;
+    seen.add(r.sessionId);
+    const state: InboxState = r.status === "waiting" ? "needs-answer" : r.status === "idle" ? "your-turn" : "working";
+    const transcript = claudeTranscript(home, r.sessionId);
+    const item: InboxItem = {
+      key: sessionKey("claude", r.sessionId),
+      agent: "claude",
+      id: r.sessionId,
+      name: r.name || r.sessionId.slice(0, 8),
+      cwd: r.cwd,
+      state,
+      since: r.statusUpdatedAt ?? r.updatedAt ?? r.startedAt ?? (transcript ? statSync(transcript).mtimeMs : 0),
+      pid,
+      resume: `claude --resume ${r.sessionId}`,
+    };
+    if (r.kind) item.kind = r.kind;
+    if (state === "needs-answer") item.reason = r.waitingFor || "input needed";
+    // "shell": the turn is over but a background command will wake the session when it ends.
+    if (state === "working" && r.status && r.status !== "busy") item.reason = r.status === "shell" ? "background command" : r.status;
+    const job = jobs.get(r.sessionId);
+    if (job) {
+      item.jobId = job.short;
+      item.resume = `claude attach ${job.short}`;
+      if (job.state === "blocked" && job.needs) item.reason = item.reason ? `${item.reason} · ${job.needs}` : job.needs;
+    }
+    const memory = memoryOf(pid);
+    if (memory) item.memory = memory;
+    const terminal = terminalOf(pid);
+    if (terminal) item.terminal = terminal;
+    if (!light && transcript) {
+      const acc = follow(claudeCursors, transcript, newClaudeAcc, feedClaude);
+      if (acc) fromTranscript(item, acc);
+    } else if (transcript) {
+      const title = quickTitle(transcript);
+      if (title) item.title = title;
+    }
+    if (job) {
+      const prs = new Map((item.prs ?? []).map((p) => [p.url, p]));
+      for (const p of jobPrs(job)) prs.set(p.url, p);
+      if (prs.size) item.prs = [...prs.values()].slice(-MAX_PRS);
+    }
+    items.push(item);
+  }
+
+  // Background sessions with no process: parked until you answer, or finished.
+  for (const [sessionId, job] of jobs) {
+    if (seen.has(sessionId)) continue;
+    const updated = Date.parse(job.updatedAt ?? job.createdAt ?? "") || 0;
+    let state: InboxState = job.state === "blocked" ? "needs-answer" : job.state === "running" ? "working" : "your-turn";
+    if (state === "needs-answer" && now - updated > staleAfter) state = "stale"; // long forgotten
+    const item: InboxItem = {
+      key: sessionKey("claude", sessionId),
+      agent: "claude",
+      id: sessionId,
+      name: job.name || job.short,
+      cwd: job.cwd,
+      state,
+      since: updated,
+      kind: "bg",
+      jobId: job.short,
+      resume: `claude attach ${job.short}`,
+    };
+    const reason = job.state === "blocked" ? job.needs || job.detail || "blocked" : job.state === "failed" ? `failed: ${job.detail ?? ""}`.trim() : undefined;
+    if (reason) item.reason = reason;
+    const transcript = light ? undefined : claudeTranscript(home, sessionId);
+    if (transcript) {
+      const acc = follow(claudeCursors, transcript, newClaudeAcc, feedClaude);
+      if (acc) fromTranscript(item, acc);
+    }
+    const prs = jobPrs(job);
+    if (prs.length) item.prs = [...new Map([...(item.prs ?? []), ...prs].map((p) => [p.url, p])).values()].slice(-MAX_PRS);
+    items.push(item);
+  }
+  return items;
+}
+
+/** The sessions running right now, as "claude:<id>" / "codex:<id>" → a name to show. Cheap: no transcripts. */
+export function runningSessions(claude = claudeHome(), codex = codexHome()): Map<string, string> {
+  const out = new Map<string, string>();
+  try {
+    for (const f of readdirSync(join(claude, "sessions"))) {
+      if (!/^\d+\.json$/.test(f)) continue;
+      try {
+        const r = JSON.parse(readFileSync(join(claude, "sessions", f), "utf8")) as ClaudeRecord;
+        if (r.sessionId && alive(r.pid ?? Number(f.split(".")[0]), r.procStart)) out.set(sessionKey("claude", r.sessionId), r.name || r.sessionId.slice(0, 8));
+      } catch {
+        // being rewritten
+      }
+    }
+  } catch {
+    // none
+  }
+  try {
+    const held = lockedInodes();
+    const dir = join(codex, "thread-writer-locks");
+    for (const f of readdirSync(dir)) {
+      if (!f.endsWith(".lock")) continue;
+      if (held && !held.has(statSync(join(dir, f)).ino)) continue;
+      const id = f.slice(0, -".lock".length);
+      out.set(sessionKey("codex", id), id.slice(0, 8));
+    }
+  } catch {
+    // none
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------- Codex
+
+/** Inode numbers of files someone holds a lock on (Linux); undefined where /proc/locks is absent. */
+function lockedInodes(): Set<number> | undefined {
+  let text: string;
+  try {
+    text = readFileSync("/proc/locks", "utf8");
+  } catch {
+    return undefined;
+  }
+  const out = new Set<number>();
+  for (const line of text.split("\n")) {
+    // "1: FLOCK  ADVISORY  WRITE 13101 103:03:9978369 0 EOF" (blocked waiters start with "->")
+    const dev = line.split(/\s+/).find((f) => /^[0-9a-f]+:[0-9a-f]+:\d+$/.test(f));
+    if (dev) out.add(Number(dev.split(":")[2]));
+  }
+  return out;
+}
+
+const rolloutCache = new Map<string, string>();
+
+function findRollouts(sessions: string, ids: string[]): void {
+  const missing = new Set(ids.filter((id) => !rolloutCache.get(id)?.startsWith(sessions) || !existsSync(rolloutCache.get(id)!)));
+  if (!missing.size || !existsSync(sessions)) return;
+  const walk = (dir: string) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true }).reverse()) {
+      if (!missing.size) return;
+      const full = join(dir, entry.name);
+      if (entry.isDirectory()) walk(full);
+      else {
+        const id = /([0-9a-f-]{36})\.jsonl$/.exec(entry.name)?.[1];
+        if (id && missing.delete(id)) rolloutCache.set(id, full);
+      }
+    }
+  };
+  walk(sessions);
+}
+
+function threadNames(home: string): Map<string, string> {
+  const names = new Map<string, string>();
+  let text = "";
+  try {
+    text = readFileSync(join(home, "session_index.jsonl"), "utf8");
+  } catch {
+    return names;
+  }
+  for (const line of text.split("\n")) {
+    try {
+      const e = JSON.parse(line) as { id?: string; thread_name?: string };
+      if (e.id && e.thread_name) names.set(e.id, e.thread_name);
+    } catch {
+      // skip
+    }
+  }
+  return names;
+}
+
+/** The working directory from the rollout's first line (session_meta). */
+function rolloutCwd(file: string): string | undefined {
+  let fd: number | undefined;
+  try {
+    fd = openSync(file, "r");
+    const buf = Buffer.alloc(256 * 1024);
+    const n = readSync(fd, buf, 0, buf.length, 0);
+    const first = buf.toString("utf8", 0, n).split("\n")[0] ?? "";
+    return /"cwd":"((?:[^"\\]|\\.)*)"/.exec(first)?.[1]?.replace(/\\(.)/g, "$1");
+  } catch {
+    return undefined;
+  } finally {
+    if (fd !== undefined) closeSync(fd);
+  }
+}
+
+/** The shell command in a Codex tool call: exec's JavaScript (`cmd:"…"`) or a function's JSON arguments. */
+export function codexCommand(name: string, input: unknown): string {
+  if (typeof input === "string") {
+    const js = /cmd:\s*"((?:[^"\\]|\\.)*)"/.exec(input)?.[1];
+    if (js !== undefined) {
+      try {
+        return JSON.parse(`"${js}"`) as string;
+      } catch {
+        return js;
+      }
+    }
+    try {
+      const args = JSON.parse(input) as Record<string, unknown>;
+      const cmd = args["cmd"] ?? args["command"];
+      if (Array.isArray(cmd)) return cmd.map(String).join(" ");
+      if (typeof cmd === "string") return cmd;
+    } catch {
+      // not JSON
+    }
+  }
+  return name;
+}
+
+interface CodexAcc {
+  state: InboxState;
+  since: number;
+  reason?: string;
+  lastMessage?: string;
+  lastPrompt?: string;
+  cwd?: string;
+  /** Tool calls without output yet, by call id. */
+  calls: Map<string, { command: string; since: number }>;
+  tokens?: number;
+  window?: number;
+  limits?: CodexLimits;
+  edited: Map<string, number>;
+}
+
+const codexCursors = new Map<string, Cursor<CodexAcc>>();
+
+function rate(w: unknown): RateWindow | undefined {
+  const r = w as { used_percent?: number; window_minutes?: number; resets_at?: number } | null | undefined;
+  if (!r || typeof r.used_percent !== "number") return undefined;
+  return { usedPercent: r.used_percent, windowMinutes: r.window_minutes ?? 0, resetsAt: (r.resets_at ?? 0) * 1000 };
+}
+
+function feedCodex(acc: CodexAcc, raw: string): void {
+  if (!/"type":"(event_msg|turn_context|response_item|session_meta)"/.test(raw.slice(0, 200))) return;
+  let e: { timestamp?: string; type?: string; payload?: Record<string, unknown> };
+  try {
+    e = JSON.parse(raw);
+  } catch {
+    return;
+  }
+  const p = e.payload ?? {};
+  const at = e.timestamp ? Date.parse(e.timestamp) : NaN;
+  if ((e.type === "turn_context" || e.type === "session_meta") && typeof p["cwd"] === "string") acc.cwd = p["cwd"];
+  if (e.type === "response_item") {
+    const callId = typeof p["call_id"] === "string" ? p["call_id"] : undefined;
+    if (!callId) return;
+    if (p["type"] === "custom_tool_call" || p["type"] === "function_call") {
+      acc.calls.set(callId, { command: codexCommand(String(p["name"] ?? "tool"), p["input"] ?? p["arguments"]), since: Number.isNaN(at) ? Date.now() : at });
+    } else if (p["type"] === "custom_tool_call_output" || p["type"] === "function_call_output") acc.calls.delete(callId);
+    return;
+  }
+  if (e.type !== "event_msg") return;
+  const item = p["item"] as { type?: string; text?: string; content?: { text?: string }[]; changes?: Record<string, unknown> } | undefined;
+  switch (p["type"]) {
+    case "item_completed": {
+      if (item?.type === "FileChange" && item.changes) for (const path of Object.keys(item.changes)) acc.edited.set(path, Number.isNaN(at) ? Date.now() : at);
+      const text = item?.text ?? item?.content?.map((c) => c.text ?? "").join("");
+      if (item?.type === "AgentMessage" && text?.trim()) acc.lastMessage = text;
+      if (item?.type === "UserMessage" && text?.trim()) acc.lastPrompt = head(text);
+      return;
+    }
+    case "token_count": {
+      const info = p["info"] as { last_token_usage?: { total_tokens?: number; input_tokens?: number }; model_context_window?: number } | null | undefined;
+      const last = info?.last_token_usage;
+      if (last) acc.tokens = last.total_tokens ?? last.input_tokens ?? acc.tokens;
+      if (info?.model_context_window) acc.window = info.model_context_window;
+      const limits = p["rate_limits"] as { primary?: unknown; secondary?: unknown } | null | undefined;
+      if (limits && !Number.isNaN(at)) {
+        acc.limits = { at };
+        const primary = rate(limits.primary);
+        const secondary = rate(limits.secondary);
+        if (primary) acc.limits.primary = primary;
+        if (secondary) acc.limits.secondary = secondary;
+      }
+      return;
+    }
+    case "task_started":
+      acc.state = "working";
+      acc.reason = undefined;
+      break;
+    case "task_complete":
+      acc.state = "your-turn";
+      acc.reason = undefined;
+      acc.calls.clear();
+      if (typeof p["last_agent_message"] === "string" && p["last_agent_message"].trim()) acc.lastMessage = p["last_agent_message"];
+      break;
+    case "turn_aborted":
+      acc.state = "your-turn";
+      acc.reason = "interrupted";
+      acc.calls.clear();
+      break;
+    default:
+      return;
+  }
+  if (!Number.isNaN(at)) acc.since = at;
+}
+
+function codexItems(home: string, now: number): { items: InboxItem[]; limits?: CodexLimits } {
+  const lockDir = join(home, "thread-writer-locks");
+  let locks: string[];
+  try {
+    locks = readdirSync(lockDir).filter((f) => f.endsWith(".lock"));
+  } catch {
+    return { items: [] };
+  }
+  const held = lockedInodes();
+  const ids = locks
+    .filter((f) => {
+      try {
+        return !held || held.has(statSync(join(lockDir, f)).ino);
+      } catch {
+        return false;
+      }
+    })
+    .map((f) => f.slice(0, -".lock".length));
+  findRollouts(join(home, "sessions"), ids);
+  const names = threadNames(home);
+  const items: InboxItem[] = [];
+  let limits: CodexLimits | undefined;
+  for (const id of ids) {
+    const file = rolloutCache.get(id);
+    if (!file) continue;
+    let mtime = 0;
+    try {
+      mtime = statSync(file).mtimeMs;
+    } catch {
+      continue;
+    }
+    const acc = follow(codexCursors, file, (): CodexAcc => ({ state: "your-turn", since: mtime, calls: new Map(), edited: new Map() }), feedCodex);
+    if (!acc) continue;
+    const entry: InboxItem = {
+      key: sessionKey("codex", id),
+      agent: "codex",
+      id,
+      name: names.get(id) ?? id.slice(0, 8),
+      cwd: acc.cwd ?? rolloutCwd(file),
+      state: acc.state,
+      since: acc.since,
+      resume: `codex resume ${id}`,
+    };
+    if (names.has(id)) entry.title = names.get(id)!;
+    setEdited(entry, acc.edited);
+    if (acc.reason) entry.reason = acc.reason;
+    if (acc.lastMessage) entry.lastMessage = clip(acc.lastMessage);
+    if (acc.lastPrompt) entry.lastPrompt = acc.lastPrompt;
+    if (acc.tokens !== undefined) {
+      entry.context = { tokens: acc.tokens, compactions: 0 };
+      if (acc.window) entry.context.window = acc.window;
+    }
+    const call = [...acc.calls.values()].sort((a, b) => a.since - b.since)[0];
+    if (acc.state === "working" && call) {
+      entry.inFlight = call;
+      if (now - call.since > APPROVAL_AFTER) entry.reason = `may need approval: ${call.command}`;
+    }
+    if (acc.limits && (!limits || acc.limits.at > limits.at)) limits = acc.limits;
+    items.push(entry);
+  }
+  return limits ? { items, limits } : { items };
+}
