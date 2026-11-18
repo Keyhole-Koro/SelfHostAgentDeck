@@ -1,0 +1,257 @@
+import assert from "node:assert/strict";
+import { execFileSync, spawn, type ChildProcess } from "node:child_process";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, it } from "node:test";
+import { summarize } from "../src/prs.ts";
+
+/** The page's API, served by `agent-diff view` over a made-up home and repository. */
+
+const CLI = join(import.meta.dirname, "..", "src", "cli.ts");
+const PAST = "2026-01-01T00:00:00Z";
+let home: string;
+let repo: string;
+let env: NodeJS.ProcessEnv;
+let child: ChildProcess | undefined;
+
+function git(cwd: string, ...args: string[]): string {
+  return execFileSync("git", args, { cwd, encoding: "utf8", env: { ...process.env, GIT_AUTHOR_DATE: PAST, GIT_COMMITTER_DATE: PAST, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" } });
+}
+
+beforeEach(() => {
+  home = mkdtempSync(join(tmpdir(), "adv-srv-home-"));
+  repo = realpathSync(mkdtempSync(join(tmpdir(), "adv-srv-repo-")));
+  env = { ...process.env, HOME: home, CLAUDE_CONFIG_DIR: "", CODEX_HOME: "", XDG_STATE_HOME: "", AGENT_DIFF_STATE_DIR: "" };
+  git(repo, "init", "-q", "-b", "main");
+  writeFileSync(join(repo, "shared.ts"), ["const a = 1;", "", "", "", "", "", "", "", "", "const z = 26;", ""].join("\n"));
+  git(repo, "add", ".");
+  git(repo, "commit", "-q", "-m", "init");
+});
+
+afterEach(() => {
+  child?.kill();
+  child = undefined;
+});
+
+function running(id: string, pid: number, record: object = {}): void {
+  const dir = join(home, ".claude", "sessions");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, `${pid}.json`), JSON.stringify({ pid, sessionId: id, cwd: repo, name: `name-${id}`, status: "idle", statusUpdatedAt: Date.now(), ...record }));
+}
+
+function transcript(id: string, rows: object[]): void {
+  const dir = join(home, ".claude", "projects", "-repo");
+  mkdirSync(dir, { recursive: true });
+  const base = { sessionId: id, cwd: repo, timestamp: new Date().toISOString() };
+  writeFileSync(join(dir, `${id}.jsonl`), [{ ...base, type: "user", message: { content: `prompt of ${id}` } }, ...rows.map((r) => ({ ...base, ...r }))].map((r) => JSON.stringify(r)).join("\n") + "\n");
+}
+
+const edit = (file: string, old_string: string, new_string: string) => ({ type: "assistant", message: { content: [{ type: "tool_use", id: `e-${Math.random()}`, name: "Edit", input: { file_path: join(repo, file), old_string, new_string } }] } });
+
+async function serve(extraEnv: NodeJS.ProcessEnv = {}): Promise<{ get: (path: string) => Promise<any>; post: (path: string, body: object) => Promise<any> }> {
+  child = spawn(process.execPath, [CLI, "view", "--port", "0"], { cwd: repo, env: { ...env, ...extraEnv } });
+  const url = await new Promise<string>((resolve, reject) => {
+    child!.stdout!.on("data", (d: Buffer) => /http:\S+/.test(String(d)) && resolve(/http:\S+/.exec(String(d))![0]));
+    child!.on("exit", (code) => reject(new Error(`server exited ${code}`)));
+  });
+  const { origin, hash } = new URL(url);
+  const headers = { "x-token": new URLSearchParams(hash.slice(1)).get("t")!, "content-type": "application/json" };
+  const call = async (path: string, init: RequestInit = {}) => {
+    const res = await fetch(origin + path, { ...init, headers });
+    const body = await res.json();
+    if (!res.ok) throw new Error(`${res.status} ${(body as { error?: string }).error}`);
+    return body;
+  };
+  return { get: (path) => call(path), post: (path, body) => call(path, { method: "POST", body: JSON.stringify(body) }) };
+}
+
+async function eventually<T>(check: () => Promise<T | undefined>, ms = 8000): Promise<T> {
+  const end = Date.now() + ms;
+  for (;;) {
+    const v = await check();
+    if (v !== undefined) return v;
+    if (Date.now() > end) throw new Error("timed out");
+    await new Promise((r) => setTimeout(r, 100));
+  }
+}
+
+describe("api: sessions sharing a file", () => {
+  it("marks both running sessions that changed the same file", async () => {
+    writeFileSync(join(repo, "shared.ts"), ["const a = 1;", "const fromA = true;", "", "", "", "", "", "", "", "", "const z = 26;", "const fromB = true;", ""].join("\n"));
+    transcript("sa", [edit("shared.ts", "const a = 1;", "const a = 1;\nconst fromA = true;")]);
+    transcript("sb", [edit("shared.ts", "const z = 26;", "const z = 26;\nconst fromB = true;")]);
+    running("sa", process.pid);
+    running("sb", process.ppid);
+    const api = await serve();
+    const inbox = await api.get("/api/inbox");
+    const by = Object.fromEntries(inbox.items.map((i: { key: string }) => [i.key, i]));
+    assert.deepEqual(by["claude:sa"].conflicts, [{ path: "shared.ts", with: ["claude:sb"] }]);
+    assert.deepEqual(by["claude:sb"].conflicts, [{ path: "shared.ts", with: ["claude:sa"] }]);
+  });
+});
+
+describe("api: pull requests", () => {
+  it("adds each pull request's state and CI, looked up with gh in the background", async () => {
+    const gh = join(home, "gh");
+    const rollup = [
+      { __typename: "CheckRun", status: "COMPLETED", conclusion: "SUCCESS" },
+      { __typename: "CheckRun", status: "COMPLETED", conclusion: "FAILURE" },
+      { __typename: "StatusContext", state: "PENDING" },
+    ];
+    writeFileSync(gh, `#!/bin/sh\necho '${JSON.stringify({ number: 7, title: "Fix login", state: "OPEN", isDraft: false, reviewDecision: "REVIEW_REQUIRED", mergeStateStatus: "BLOCKED", url: "https://github.com/o/r/pull/7", statusCheckRollup: rollup })}'\n`);
+    chmodSync(gh, 0o755);
+    transcript("sa", [{ type: "pr-link", prNumber: 7, prUrl: "https://github.com/o/r/pull/7", prRepository: "o/r" }]);
+    running("sa", process.pid);
+    const api = await serve({ AGENT_DIFF_GH: gh });
+    const status = await eventually(async () => (await api.get("/api/inbox")).prStatus["https://github.com/o/r/pull/7"]);
+    assert.equal(status.ci, "failing");
+    assert.deepEqual(status.checks, { passed: 1, failed: 1, pending: 1 });
+    assert.equal(status.review, "REVIEW_REQUIRED");
+    assert.equal(status.title, "Fix login");
+  });
+
+  it("sums up checks: failing beats pending beats passing", () => {
+    const s = (rollup: object[]) => summarize({ statusCheckRollup: rollup }, "u").ci;
+    assert.equal(s([]), "none");
+    assert.equal(s([{ status: "COMPLETED", conclusion: "SUCCESS" }, { status: "COMPLETED", conclusion: "SKIPPED" }]), "passing");
+    assert.equal(s([{ status: "IN_PROGRESS" }, { status: "COMPLETED", conclusion: "SUCCESS" }]), "pending");
+    assert.equal(s([{ state: "ERROR" }, { status: "QUEUED" }]), "failing");
+  });
+});
+
+describe("api: later and done", () => {
+  it("holds a session and releases it", async () => {
+    running("sa", process.pid, { status: "waiting", waitingFor: "input needed" });
+    const api = await serve();
+    await api.get("/api/inbox");
+    const { hold } = await api.post("/api/hold", { key: "claude:sa", kind: "later", until: "2h" });
+    assert.equal(hold.kind, "later");
+    assert.ok(hold.until > Date.now() + 36e5);
+    assert.equal((await api.get("/api/inbox")).items[0].hold.kind, "later");
+    assert.deepEqual(await api.post("/api/release", { key: "claude:sa" }), { released: true });
+    assert.equal((await api.get("/api/inbox")).items[0].hold, undefined);
+    await assert.rejects(api.post("/api/hold", { key: "claude:nope", kind: "done" }), /no longer listed/);
+  });
+});
+
+describe("api: cleanup", () => {
+  it("lists idle sessions and the worktrees that can go, with the commands", async () => {
+    const wt = (name: string) => join(realpathSync(mkdtempSync(join(tmpdir(), "adv-wt-"))), name);
+    const merged = wt("merged");
+    const dirty = wt("dirty");
+    const busy = wt("busy");
+    git(repo, "worktree", "add", "-q", "-b", "done-branch", merged);
+    git(repo, "worktree", "add", "-q", "-b", "dirty-branch", dirty);
+    git(repo, "worktree", "add", "-q", "-b", "busy-branch", busy);
+    writeFileSync(join(dirty, "wip.txt"), "wip\n");
+    running("idle", process.pid, { status: "idle", statusUpdatedAt: Date.now() - 3 * 864e5 });
+    running("worker", process.ppid, { status: "busy", cwd: busy });
+    const api = await serve();
+    await api.get("/api/inbox");
+    const c = await api.get("/api/cleanup");
+    assert.deepEqual(c.sessions.map((s: { key: string; close: string }) => [s.key, s.close]), [["claude:idle", `kill ${process.pid}`]]);
+    const by = Object.fromEntries(c.worktrees.map((w: { path: string }) => [w.path, w]));
+    assert.equal(by[merged].removable, true);
+    assert.deepEqual(by[merged].commands, [`git -C ${repo} worktree remove ${merged}`, `git -C ${repo} branch -d done-branch`]);
+    assert.equal(by[dirty].removable, false);
+    assert.equal(by[dirty].dirty, true);
+    assert.equal(by[busy].removable, false);
+    assert.deepEqual(by[busy].sessions, ["claude:worker"]);
+  });
+});
+
+describe("api: herdr", () => {
+  const codexId = "01a1e377-0000-7000-8000-0000000000c1";
+  let sleeper: ChildProcess | undefined;
+  let holder: ChildProcess | undefined;
+  afterEach(() => {
+    sleeper?.kill();
+    if (holder?.pid) process.kill(-holder.pid, "SIGTERM");
+    sleeper = holder = undefined;
+  });
+
+  /** A fake herdr: logs each call with the socket it was pointed at, and answers like herdr does. */
+  function fakeHerdr(): { bin: string; log: string; socket: string } {
+    const log = join(home, "herdr.log");
+    const socket = join(home, "herdr.sock");
+    const agents = [
+      { pane_id: "w1:p9", agent_status: "idle", agent: "claude", terminal_id: "t9", workspace_id: "w1", tab_id: "w1:t1", focused: false, revision: 1 },
+      { pane_id: "w1:p4", agent_status: "blocked", agent: "codex", agent_session: { agent: "codex", kind: "id", source: "hook", value: codexId }, terminal_id: "t4", workspace_id: "w1", tab_id: "w1:t1", focused: false, revision: 1 },
+    ];
+    const bin = join(home, "herdr");
+    writeFileSync(
+      bin,
+      `#!/bin/sh
+echo "$HERDR_SOCKET_PATH $*" >> "${log}"
+case "$1 $2" in
+  "agent list") printf '%s\n' '${JSON.stringify({ id: "cli:agent:list", result: { type: "agent_list", agents } })}' ;;
+  "agent read") printf '%s\n' '${JSON.stringify({ id: "cli:agent:read", result: { type: "pane_read", read: { text: "Allow this command?\n> 1. Yes\n  2. No" } } })}' ;;
+  *) printf '%s\n' '{"id":"cli","result":{"type":"agent_info"}}' ;;
+esac
+`,
+    );
+    chmodSync(bin, 0o755);
+    return { bin, log, socket };
+  }
+
+  async function setUp(extra: string[] = []): Promise<{ api: Awaited<ReturnType<typeof serve>>; log: string; socket: string }> {
+    const { bin, log, socket } = fakeHerdr();
+    // The Claude session's process runs in herdr pane w1:p9.
+    sleeper = spawn("sleep", ["30"], { env: { ...process.env, HERDR_PANE_ID: "w1:p9", HERDR_SOCKET_PATH: socket } });
+    running("sa", sleeper.pid!, { status: "idle" });
+    // A Codex thread, working as far as its rollout says.
+    const dir = join(home, ".codex", "sessions", "2026", "11", "19");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, `rollout-x-${codexId}.jsonl`), [{ timestamp: new Date().toISOString(), type: "session_meta", payload: { id: codexId, cwd: repo } }, { timestamp: new Date().toISOString(), type: "event_msg", payload: { type: "task_started" } }].map((e) => JSON.stringify(e)).join("\n") + "\n");
+    const locks = join(home, ".codex", "thread-writer-locks");
+    mkdirSync(locks, { recursive: true });
+    writeFileSync(join(locks, `${codexId}.lock`), "");
+    holder = spawn("flock", [join(locks, `${codexId}.lock`), "sleep", "30"], { stdio: "ignore", detached: true });
+    await new Promise((r) => setTimeout(r, 200));
+    child = spawn(process.execPath, [CLI, "view", "--port", "0", ...extra], { cwd: repo, env: { ...env, AGENT_DIFF_HERDR: bin } });
+    const url = await new Promise<string>((resolve) => child!.stdout!.on("data", (d: Buffer) => /http:\S+/.test(String(d)) && resolve(/http:\S+/.exec(String(d))![0])));
+    const { origin, hash } = new URL(url);
+    const headers = { "x-token": new URLSearchParams(hash.slice(1)).get("t")!, "content-type": "application/json" };
+    const call = async (path: string, init: RequestInit = {}) => {
+      const res = await fetch(origin + path, { ...init, headers });
+      const body = await res.json();
+      if (!res.ok) throw new Error(`${res.status} ${(body as { error?: string }).error}`);
+      return body;
+    };
+    return { api: { get: (p) => call(p), post: (p, b) => call(p, { method: "POST", body: JSON.stringify(b) }) }, log, socket };
+  }
+
+  it("shows each session's pane and state, and Codex approvals herdr sees", { skip: process.platform !== "linux" && "reads /proc" }, async () => {
+    const { api } = await setUp();
+    const inbox = await eventually(async () => {
+      const r = await api.get("/api/inbox");
+      const by = Object.fromEntries(r.items.map((i: { key: string }) => [i.key, i]));
+      return by["claude:sa"]?.herdr?.status === "idle" && by[`codex:${codexId}`]?.herdr ? by : undefined;
+    });
+    assert.deepEqual(inbox["claude:sa"].herdr, { pane: "w1:p9", status: "idle" });
+    assert.deepEqual(inbox[`codex:${codexId}`].herdr, { pane: "w1:p4", status: "blocked" });
+    assert.equal(inbox[`codex:${codexId}`].state, "needs-answer");
+  });
+
+  it("focuses, prompts, sends allowed keys and reads the screen, in the session's own herdr", { skip: process.platform !== "linux" && "reads /proc" }, async () => {
+    const { api, log, socket } = await setUp();
+    await eventually(async () => ((await api.get("/api/inbox")).items.some((i: { key: string; herdr?: object }) => i.key === `codex:${codexId}` && i.herdr) ? true : undefined));
+    await api.post("/api/herdr/focus", { key: "claude:sa" });
+    await api.post("/api/herdr/prompt", { key: "claude:sa", text: "Ship it" });
+    await api.post("/api/herdr/keys", { key: `codex:${codexId}`, keys: ["1", "enter"] });
+    await assert.rejects(api.post("/api/herdr/keys", { key: "claude:sa", keys: ["ctrl+d"] }), /Keys not allowed: ctrl\+d/);
+    await assert.rejects(api.post("/api/herdr/prompt", { key: "claude:sa", text: "  " }), /Write a prompt/);
+    assert.deepEqual(await api.get(`/api/herdr/screen?key=${encodeURIComponent(`codex:${codexId}`)}`), { text: "Allow this command?\n> 1. Yes\n  2. No" });
+    const calls = readFileSync(log, "utf8").split("\n").filter((l) => !l.includes("agent list") && l);
+    assert.deepEqual(calls, [`${socket} agent focus w1:p9`, `${socket} agent prompt w1:p9 Ship it`, `${socket} agent send-keys w1:p4 1 enter`, `${socket} agent read w1:p4 --source visible`]);
+  });
+
+  it("leaves herdr alone with --no-herdr", { skip: process.platform !== "linux" && "reads /proc" }, async () => {
+    const { api, log } = await setUp(["--no-herdr"]);
+    const r = await api.get("/api/inbox");
+    assert.ok(r.items.every((i: { herdr?: object }) => !i.herdr));
+    await assert.rejects(api.post("/api/herdr/focus", { key: "claude:sa" }), /does not run in a herdr pane/);
+    assert.equal(existsSync(log), false, "herdr was never run");
+  });
+});

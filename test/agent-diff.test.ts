@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeEach, describe, it } from "node:test";
@@ -232,5 +232,140 @@ describe("--self", () => {
     codexSession("them", { [join(repo, "theirs.md")]: { type: "add", content: "theirs\n" } });
     execFileSync(process.execPath, [CLI, "add", "--self"], { cwd: repo, env: { ...process.env, HOME: home, CLAUDE_CONFIG_DIR: "", CODEX_HOME: "", CLAUDE_CODE_SESSION_ID: "me" } });
     assert.equal(git("diff", "--cached", "--name-only").trim(), "mine.md");
+  });
+});
+
+describe("inbox", () => {
+  const HOUR = 36e5;
+
+  /** A running Claude Code process's record, as Claude Code writes it to ~/.claude/sessions. */
+  function claudeRunning(id: string, record: object, pid = process.pid): void {
+    const dir = join(home, ".claude", "sessions");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, `${pid}.json`), JSON.stringify({ pid, sessionId: id, cwd: repo, name: `name-${id}`, kind: "interactive", ...record }));
+  }
+
+  function inbox(...args: string[]): { items: { key: string; state: string; reason?: string; asks?: boolean; lastMessage?: string; questions?: { question: string; options: string[] }[] }[] } {
+    // Outside any repository: the inbox spans them all.
+    return JSON.parse(execFileSync(process.execPath, [CLI, "inbox", "--json", ...args], { cwd: home, encoding: "utf8", env: { ...process.env, HOME: home, CLAUDE_CONFIG_DIR: "", CODEX_HOME: "" } }));
+  }
+
+  it("sorts running Claude sessions into needs an answer, your turn, working and stale", () => {
+    const now = Date.now();
+    claudeSession("asking", [
+      { type: "assistant", message: { content: [{ type: "tool_use", id: "tu1", name: "AskUserQuestion", input: { questions: [{ question: "Which one?", options: [{ label: "A" }, { label: "B" }] }] } }] } },
+    ]);
+    claudeRunning("asking", { status: "waiting", waitingFor: "input needed", statusUpdatedAt: now }, process.pid);
+    claudeSession("done", [{ type: "assistant", message: { content: [{ type: "text", text: "Pushed it.\nShall I open the PR?" }] } }]);
+    claudeRunning("done", { status: "idle", statusUpdatedAt: now - HOUR }, process.ppid);
+    claudeRunning("busy", { status: "busy", statusUpdatedAt: now }, 1);
+    claudeRunning("old", { status: "idle", statusUpdatedAt: now - 3 * 24 * HOUR }, process.pid + 100000000 /* no such process */);
+    const items = inbox().items;
+    const by = Object.fromEntries(items.map((i) => [i.key, i]));
+    assert.equal(by["claude:asking"]?.state, "needs-answer");
+    assert.equal(by["claude:asking"]?.reason, "input needed");
+    assert.deepEqual(by["claude:asking"]?.questions, [{ question: "Which one?", options: ["A", "B"] }]);
+    assert.equal(by["claude:done"]?.state, "your-turn");
+    assert.equal(by["claude:done"]?.asks, true);
+    assert.match(by["claude:done"]?.lastMessage ?? "", /Shall I open the PR\?$/);
+    assert.equal(by["claude:busy"]?.state, "working");
+    assert.equal(by["claude:old"], undefined, "a dead process is not listed");
+    assert.deepEqual(items.map((i) => i.state).slice(0, 2), ["needs-answer", "your-turn"]);
+  });
+
+  it("calls a session idle for longer than --stale stale", () => {
+    claudeRunning("done", { status: "idle", statusUpdatedAt: Date.now() - 3 * HOUR });
+    assert.equal(inbox().items[0]?.state, "your-turn");
+    assert.equal(inbox("--stale", "2h").items[0]?.state, "stale");
+  });
+
+  it("drops a question once it has an answer", () => {
+    claudeSession("answered", [
+      { type: "assistant", message: { content: [{ type: "tool_use", id: "tu1", name: "AskUserQuestion", input: { questions: [{ question: "Which one?", options: [] }] } }] } },
+      { type: "user", message: { content: [{ type: "tool_result", tool_use_id: "tu1", content: "A" }] } },
+    ]);
+    claudeRunning("answered", { status: "waiting", waitingFor: "approve Bash: npm test" });
+    const [item] = inbox().items;
+    assert.equal(item?.reason, "approve Bash: npm test");
+    assert.equal(item?.questions, undefined);
+  });
+
+  it("reads loaded Codex threads: done or working", { skip: process.platform === "linux" && !existsSync("/usr/bin/flock") && "needs flock(1)" }, async () => {
+    const locks = join(home, ".codex", "thread-writer-locks");
+    mkdirSync(locks, { recursive: true });
+    const rollout = (id: string, events: object[]) => {
+      const dir = join(home, ".codex", "sessions", "2026", "11", "18");
+      mkdirSync(dir, { recursive: true });
+      const rows = [{ timestamp: NOW, type: "session_meta", payload: { id, cwd: repo } }, ...events.map((p) => ({ timestamp: NOW, type: "event_msg", payload: p }))];
+      writeFileSync(join(dir, `rollout-2026-11-18T00-00-00-${id}.jsonl`), rows.map((r) => JSON.stringify(r)).join("\n") + "\n");
+      writeFileSync(join(locks, `${id}.lock`), "");
+    };
+    const done = "01a1e377-4d8d-7c12-811c-31d47f2f2aa6";
+    const working = "01a1e377-4d8d-7c12-811c-31d47f2f2aa7";
+    const closed = "01a1e377-4d8d-7c12-811c-31d47f2f2aa8";
+    rollout(done, [{ type: "task_started" }, { type: "task_complete", last_agent_message: "All tests pass." }]);
+    rollout(working, [{ type: "task_complete", last_agent_message: "x" }, { type: "task_started" }]);
+    rollout(closed, [{ type: "task_complete", last_agent_message: "x" }]);
+    writeFileSync(join(home, ".codex", "session_index.jsonl"), JSON.stringify({ id: done, thread_name: "Fix the tests" }) + "\n");
+    // Codex holds the lock of every loaded thread; where /proc/locks exists, an unheld lock means closed.
+    const holders = process.platform === "linux" ? [done, working].map((id) => spawn("flock", [join(locks, `${id}.lock`), "sleep", "30"], { stdio: "ignore", detached: true })) : [];
+    try {
+      if (holders.length) await new Promise((r) => setTimeout(r, 300));
+      const by = Object.fromEntries(inbox().items.map((i) => [i.key, i as { state: string; lastMessage?: string; name?: string }]));
+      assert.equal(by[`codex:${done}`]?.state, "your-turn");
+      assert.equal(by[`codex:${done}`]?.lastMessage, "All tests pass.");
+      assert.equal(by[`codex:${done}`]?.name, "Fix the tests");
+      assert.equal(by[`codex:${working}`]?.state, "working");
+      if (holders.length) assert.equal(by[`codex:${closed}`], undefined);
+    } finally {
+      for (const h of holders) if (h.pid) process.kill(-h.pid, "SIGTERM"); // the group: flock and its sleep
+    }
+  });
+
+  it("is served to the page, outside a repository too", async () => {
+    claudeRunning("done", { status: "idle", statusUpdatedAt: Date.now() });
+    const child = spawn(process.execPath, [CLI, "inbox", "--view", "--port", "0"], { cwd: home, env: { ...process.env, HOME: home, CLAUDE_CONFIG_DIR: "", CODEX_HOME: "" } });
+    try {
+      const url = await new Promise<string>((resolve) => child.stdout.on("data", (d: Buffer) => /http:\S+/.test(String(d)) && resolve(/http:\S+/.exec(String(d))![0])));
+      const { origin, hash } = new URL(url);
+      const token = new URLSearchParams(hash.slice(1)).get("t")!;
+      assert.equal((await fetch(`${origin}/api/inbox`)).status, 403);
+      const body = (await (await fetch(`${origin}/api/inbox`, { headers: { "x-token": token } })).json()) as { items: { key: string }[] };
+      assert.deepEqual(body.items.map((i) => i.key), ["claude:done"]);
+      assert.deepEqual(await (await fetch(`${origin}/api/view`, { headers: { "x-token": token } })).json(), { root: null });
+      assert.equal((await fetch(`${origin}/api/stage`, { method: "POST", headers: { "x-token": token }, body: "{}" })).status, 400);
+      // Only repositories of listed sessions, never any path the request names.
+      const other = await fetch(`${origin}/api/view?repo=${encodeURIComponent(home)}`, { headers: { "x-token": token } });
+      assert.equal(other.status, 400);
+      // The repository of a listed session is fine.
+      const own = (await (await fetch(`${origin}/api/view?repo=${encodeURIComponent(repo)}`, { headers: { "x-token": token } })).json()) as { root: string };
+      assert.equal(own.root, repo);
+    } finally {
+      child.kill();
+    }
+  });
+});
+
+describe("projects", () => {
+  it("groups a worktree's session with its repository, and reads its changes from the worktree", async () => {
+    const wt = join(mkdtempSync(join(tmpdir(), "ab-wt-")), "feature");
+    git("worktree", "add", "-q", "-b", "feature", wt);
+    writeFileSync(join(wt, "wt.md"), "from the worktree\n");
+    const id = "in-worktree";
+    const dir = join(home, ".claude", "sessions");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, `${process.pid}.json`), JSON.stringify({ pid: process.pid, sessionId: id, cwd: wt, name: "wt", status: "idle", statusUpdatedAt: Date.now() }));
+    const child = spawn(process.execPath, [CLI, "inbox", "--view", "--port", "0"], { cwd: home, env: { ...process.env, HOME: home, CLAUDE_CONFIG_DIR: "", CODEX_HOME: "" } });
+    try {
+      const url = await new Promise<string>((resolve) => child.stdout.on("data", (d: Buffer) => /http:\S+/.test(String(d)) && resolve(/http:\S+/.exec(String(d))![0])));
+      const { origin, hash } = new URL(url);
+      const headers = { "x-token": new URLSearchParams(hash.slice(1)).get("t")! };
+      const inbox = (await (await fetch(`${origin}/api/inbox`, { headers })).json()) as { items: { key: string; repo: string; project: string }[] };
+      assert.deepEqual(inbox.items.map((i) => [i.key, i.repo, i.project]), [[`claude:${id}`, realpathSync(wt), realpathSync(repo)]]);
+      const view = (await (await fetch(`${origin}/api/view?repo=${encodeURIComponent(inbox.items[0]!.repo)}`, { headers })).json()) as { unknown: { path: string }[] };
+      assert.deepEqual(view.unknown.map((f) => f.path), ["wt.md"]);
+    } finally {
+      child.kill();
+    }
   });
 });
