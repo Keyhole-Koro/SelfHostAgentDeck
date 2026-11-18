@@ -5,7 +5,10 @@ import { applyAdd, findSession, load, parseSince, planAdd, type Loaded } from ".
 import { repoRoot } from "./git.ts";
 import { serve } from "./server.ts";
 import { runHook } from "./hook.ts";
-import { agentInstalled, installHooks, installSkills, uninstallHooks, uninstallSkills } from "./install.ts";
+import { holdCommand, loadInbox, printCleanup, printInbox, publishInbox, publisher, watchInbox } from "./inbox-cli.ts";
+import { agentInstalled, installHooks, installSkills, installStatusLine, uninstallHooks, uninstallSkills, uninstallStatusLine } from "./install.ts";
+import { statusLineFor } from "./statusline.ts";
+import { bold, cyan, dim, green, red, when, yellow } from "./term.ts";
 import type { Session, Transcripts } from "./types.ts";
 
 const HELP = `agent-diff — which Claude Code or Codex session made each uncommitted change
@@ -15,9 +18,21 @@ const HELP = `agent-diff — which Claude Code or Codex session made each uncomm
   agent-diff show <session>  The hunks a session made, as a diff
   agent-diff add <session>   Stage exactly that session's changes (whole files and single hunks)
   agent-diff view            Browse it all in a local web page (127.0.0.1; --port to pick one)
+  agent-diff inbox           Running sessions, in every repository, that wait on you
+                             (--view: the same as a web page that refreshes itself;
+                             --watch: report each session that starts waiting, --notify: on the
+                             desktop too; --publish: put a private snapshot online with the
+                             SelfHostArtifacts \`artifact\` CLI, to check from your phone)
+  agent-diff later <session> Take a session off the list for a while (--until 2h, tomorrow, 9:00)
+  agent-diff done <session>  Take a session off the list until it does something new
+  agent-diff unhold <session>  Put it back
+  agent-diff cleanup         Idle sessions and worktrees nobody uses, with the commands to close
+                             or remove them (nothing is removed for you)
+  agent-diff statusline      One line for Claude Code's status line: the other sessions that wait
   agent-diff install         Record every write as it happens (hooks for Claude Code and Codex),
-                             and teach the agents to commit only their own changes (a skill)
-  agent-diff uninstall       Remove both
+                             and teach the agents to commit only their own changes (a skill);
+                             --statusline also shows the waiting sessions in Claude Code's status line
+  agent-diff uninstall       Remove all of it
 
 Options
   -C <dir>         Run in another repository
@@ -26,27 +41,16 @@ Options
   --days <n>       How far back to read transcripts (default 30; files committed earlier are
                    only matched against sessions after their last commit anyway)
   --dry-run        With add: show what would be staged
+  --stale <time>   With inbox: idle longer than this counts as left alone (default 1d)
+  --all            With inbox: list the sessions left alone one by one
+  --interval <s>   With inbox --watch: seconds between looks (default 5)
+  --no-herdr       With view: leave herdr alone (no pane states, no focusing or sending)
   --json           Machine-readable output
 
   --self           With show/add: the Claude Code or Codex session running the command
 
 <session> is an id prefix (e.g. 0be1c91d), optionally prefixed with claude: or codex:.
 Reads ~/.claude/projects and ~/.codex/sessions (or $CLAUDE_CONFIG_DIR, $CODEX_HOME).`;
-
-const color = process.stdout.isTTY && !process.env["NO_COLOR"];
-const paint = (code: string) => (s: string) => (color ? `\u001b[${code}m${s}\u001b[0m` : s);
-const bold = paint("1");
-const dim = paint("2");
-const green = paint("32");
-const red = paint("31");
-const yellow = paint("33");
-const cyan = paint("36");
-
-function when(ms: number): string {
-  const d = new Date(ms);
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${d.getMonth() + 1}/${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
 
 function label(s: Session | undefined, key: string): string {
   if (!s) return key;
@@ -139,7 +143,16 @@ function add(loaded: Loaded, key: string, dryRun: boolean): void {
   console.log(dim(`\nStaged. Check with: git diff --cached --stat`));
 }
 
-function installCommand(command: "install" | "uninstall", only: string | undefined): void {
+function installCommand(command: "install" | "uninstall", only: string | undefined, statusLine: boolean): void {
+  if (command === "install" && statusLine) {
+    const r = installStatusLine();
+    if (r.skipped) console.log(`- Claude Code: your status line already runs ${r.skipped}; left as it is. Add \`agent-diff statusline\` to it yourself.`);
+    else console.log(`${r.changed ? "✓" : "-"} Claude Code: ${r.changed ? "status line set in" : "status line already set in"} ${r.file}`);
+  }
+  if (command === "uninstall") {
+    const r = uninstallStatusLine();
+    if (r.changed) console.log(`✓ Claude Code: status line removed from ${r.file}`);
+  }
   const agents = (only ? [only] : ["claude", "codex"]).filter((a): a is "claude" | "codex" => a === "claude" || a === "codex");
   if (only && agents.length === 0) throw new Error(`--agent is claude or codex, not "${only}"`);
   for (const agent of agents) {
@@ -174,6 +187,7 @@ function selfSession(): string {
 function main(): void {
   const { values: o, positionals } = parseArgs({
     allowPositionals: true,
+    allowNegative: true,
     options: {
       C: { type: "string", short: "C" },
       days: { type: "string" },
@@ -185,6 +199,16 @@ function main(): void {
       agent: { type: "string" },
       port: { type: "string" },
       self: { type: "boolean" },
+      stale: { type: "string" },
+      all: { type: "boolean" },
+      view: { type: "boolean" },
+      watch: { type: "boolean" },
+      notify: { type: "boolean" },
+      interval: { type: "string" },
+      until: { type: "string" },
+      statusline: { type: "boolean" },
+      herdr: { type: "boolean", default: true },
+      publish: { type: "boolean" },
       help: { type: "boolean", short: "h" },
     },
   });
@@ -194,16 +218,46 @@ function main(): void {
   }
   const [command, given] = positionals;
   const arg = given ?? (o.self ? selfSession() : undefined);
-  if (command === "install" || command === "uninstall") return void installCommand(command, o.agent);
-  const root = repoRoot(o.C ?? process.cwd());
+  if (command === "install" || command === "uninstall") return void installCommand(command, o.agent, !!o.statusline);
   const days = o.days ? Number(o.days) : 30;
-  if (command === "view") {
-    void serve({ root, days, port: o.port ? Number(o.port) : 0 }).then((url) => {
+  const staleAfter = o.stale ? Date.now() - parseSince(o.stale) : undefined;
+  if (command === "later" || command === "done" || command === "unhold") return void holdCommand(command, given, o.until);
+  if (command === "cleanup") return void printCleanup(staleAfter);
+  if (command === "inbox" && o.watch) {
+    void watchInbox({ staleAfter, interval: (o.interval ? Number(o.interval) : 5) * 1000, notify: !!o.notify, ...(o.publish && { onChange: publisher() }) });
+    return;
+  }
+  if (command === "inbox" && o.publish) {
+    void publishInbox(loadInbox(staleAfter)).then(
+      (url) => console.log(`Published: ${url}`),
+      (e: Error) => {
+        console.error(e.message);
+        process.exitCode = 1;
+      },
+    );
+    return;
+  }
+  if (command === "inbox" && !o.view) {
+    const inbox = loadInbox(staleAfter);
+    if (o.json) console.log(JSON.stringify(inbox, null, 2));
+    else printInbox(inbox, !!o.all);
+    return;
+  }
+  if (command === "view" || command === "inbox") {
+    // The inbox spans every repository, so the page also works outside one (inbox only).
+    let root: string | undefined;
+    try {
+      root = repoRoot(o.C ?? process.cwd());
+    } catch (e) {
+      if (command === "view") throw e;
+    }
+    void serve({ root, days, staleAfter, port: o.port ? Number(o.port) : 0, herdr: o.herdr }).then((url) => {
       const query = o.since ? `&since=${encodeURIComponent(o.since)}` : o.base ? `&base=${encodeURIComponent(o.base)}` : "";
-      console.log(`Agent Diff for ${root}\n\n  ${url}${query}\n\nOpen it in a browser. Ctrl-C to stop.`);
+      console.log(`Agent Diff${root ? ` for ${root}` : ""}\n\n  ${url}${query}\n\nOpen it in a browser. Ctrl-C to stop.`);
     });
     return;
   }
+  const root = repoRoot(o.C ?? process.cwd());
   const loaded = load(root, { days, base: o.base, since: o.since ? parseSince(o.since) : undefined });
   const { transcripts, attributions } = loaded;
 
@@ -257,7 +311,8 @@ async function hook(): Promise<void> {
   let stdin = "";
   for await (const chunk of process.stdin) stdin += chunk;
   try {
-    runHook(agent, stdin);
+    const out = runHook(agent, stdin);
+    if (out) process.stdout.write(out + "\n");
   } catch {
     // never block or fail a tool call
   }
@@ -265,6 +320,15 @@ async function hook(): Promise<void> {
 
 if (process.argv[2] === "hook") {
   await hook();
+} else if (process.argv[2] === "statusline") {
+  let stdin = "";
+  if (!process.stdin.isTTY) for await (const chunk of process.stdin) stdin += chunk;
+  try {
+    const line = statusLineFor(stdin);
+    if (line) console.log(line);
+  } catch {
+    // a status line must never break the prompt
+  }
 } else {
   try {
     main();
