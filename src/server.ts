@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { Worker } from "node:worker_threads";
 import { join } from "node:path";
@@ -9,7 +9,7 @@ import { findConflicts } from "./conflicts.ts";
 import { parseSince } from "./core.ts";
 import { repoInfo } from "./git.ts";
 import { focus, herdrAgents, matchPanes, prompt, screen, sendKeys, type HerdrAgent } from "./herdr.ts";
-import { applyHolds, hold, parseUntil, release } from "./holds.ts";
+import { applyHolds, hold, parseUntil, release, stateDir } from "./holds.ts";
 import { readInbox, type Inbox } from "./inbox.ts";
 import { prStatuses } from "./prs.ts";
 import {
@@ -170,6 +170,24 @@ async function body(req: IncomingMessage): Promise<Record<string, unknown>> {
   return text ? (JSON.parse(text) as Record<string, unknown>) : {};
 }
 
+/**
+ * The local page's token, kept across restarts (readable by you only) so that a bookmarked URL
+ * keeps working when the page runs as a service.
+ */
+function localToken(): string {
+  const file = join(stateDir(), "token");
+  try {
+    const t = readFileSync(file, "utf8").trim();
+    if (/^[0-9a-f]{32}$/.test(t)) return t;
+  } catch {
+    // first start
+  }
+  const t = randomBytes(16).toString("hex");
+  mkdirSync(stateDir(), { recursive: true, mode: 0o700 });
+  writeFileSync(file, t + "\n", { mode: 0o600 });
+  return t;
+}
+
 function listen(server: Server, port: number): Promise<number> {
   return new Promise((resolve, reject) => {
     server.once("error", reject);
@@ -181,7 +199,7 @@ function listen(server: Server, port: number): Promise<number> {
 }
 
 export async function serve(opts: ServeOptions): Promise<Served> {
-  const token = randomBytes(16).toString("hex");
+  const token = localToken();
   const attribution = attributionWorker();
   // Read the month of transcripts now, so the first look at a session's changes is quick.
   void attribution({ op: "warm", days: opts.days }).catch(() => {});

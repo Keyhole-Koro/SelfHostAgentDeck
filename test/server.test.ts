@@ -270,3 +270,15 @@ describe("herdr: matching panes", () => {
     assert.equal(m.get("codex:b"), undefined, "no guess without a matching title");
   });
 });
+
+describe("api: the local token", () => {
+  it("stays the same across restarts, so a bookmarked URL keeps working", async () => {
+    const start = async () => {
+      const c = spawn(process.execPath, [CLI, "inbox", "--view", "--port", "0", "--no-herdr"], { cwd: home, env });
+      const url = await new Promise<string>((resolve) => c.stdout!.on("data", (d: Buffer) => /http:\S+/.test(String(d)) && resolve(/http:\S+/.exec(String(d))![0])));
+      c.kill();
+      return new URL(url).hash;
+    };
+    assert.equal(await start(), await start());
+  });
+});
