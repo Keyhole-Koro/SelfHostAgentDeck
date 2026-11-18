@@ -151,6 +151,53 @@ publishes a snapshot of the inbox with [SelfHostArtifacts](https://github.com/Ke
 `artifact` CLI to your own deployment: a private page (only you and the viewers you allow) that
 reloads itself every minute. It includes the end of each session's last reply.
 
+### From your phone, signed in with a passkey
+
+The page can also be served at a host name of yours, through a
+[Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/),
+to devices you added: see what waits, answer it, send prompts, all from the phone. Like Claude
+Code's Remote Control, but on your own domain.
+
+```bash
+# Once: a tunnel from a host name in your Cloudflare DNS to this computer
+cloudflared tunnel login
+cloudflared tunnel create agent-diff
+cloudflared tunnel route dns agent-diff agents.example.com
+cat > ~/.cloudflared/agent-diff.yml <<YML
+tunnel: agent-diff
+credentials-file: $HOME/.cloudflared/<tunnel id>.json
+ingress:
+  - hostname: agents.example.com
+    service: http://127.0.0.1:47301
+  - service: http_status:404
+YML
+cloudflared tunnel --config ~/.cloudflared/agent-diff.yml run
+
+# The page, also for signed-in devices at that host name
+agent-diff inbox --view --remote https://agents.example.com
+
+# Add a phone: scan the QR code, then make a passkey on it
+agent-diff remote pair
+```
+
+How it is kept to you:
+
+- **Passkeys only.** A device signs in with a passkey made for that host name; there is no
+  password. A device is added through a **pairing link** that works once, for 10 minutes, and is
+  made on this computer only (`agent-diff remote pair`, or **Remote → Add a phone** on the local
+  page): a signed-in device cannot add others.
+- The session is a signed, `HttpOnly`, `Secure`, `SameSite=Strict` cookie that names its
+  passkey; removing the device (`agent-diff remote revoke`, or **Remote**) ends its sessions.
+- The tunnel's listener is on 127.0.0.1 and answers only requests for the host name; requests that
+  change something must come from the page itself (same origin and its header). Pages carry a
+  strict Content-Security-Policy and cannot be framed.
+- Everything a device does (prompts, keys, Later/Done, staging, sign-ins) is logged:
+  `agent-diff remote log`, or **Remote** on the page.
+
+The keys, the passkeys' public keys and the log are in `$XDG_STATE_HOME/agent-diff/remote/`,
+readable by you only. The local page keeps its token across restarts, so its URL can be
+bookmarked when it runs as a service.
+
 ### Where it looks
 
 - **Claude Code** writes a record per running process to `~/.claude/sessions/<pid>.json`,
@@ -193,6 +240,7 @@ $ git commit
 | `agent-diff later` / `done` / `unhold` `<session>` | Take a session off the list for a while, or until it moves on |
 | `agent-diff cleanup` | Idle sessions and unused worktrees, with the commands to close or remove them |
 | `agent-diff statusline` | One line for Claude Code's status line (`install --statusline` sets it up) |
+| `agent-diff remote pair` / `devices` / `revoke <id>` / `log` | Add a phone (one-time link and QR code), list or remove devices, see what they did |
 | `agent-diff install` / `uninstall` | Hooks and skill for Claude Code and Codex (`--agent claude\|codex` for one) |
 
 | Option | |
