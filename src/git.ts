@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
-import { readFileSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { readFileSync, realpathSync, statSync } from "node:fs";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 
 export interface Hunk {
   /** The "@@ … @@" header line, as git printed it. */
@@ -29,6 +29,21 @@ function git(cwd: string, args: string[], maxBuffer = 256 * 1024 * 1024): string
 
 export function repoRoot(cwd: string): string {
   return git(cwd, ["rev-parse", "--show-toplevel"]).trim();
+}
+
+/**
+ * The working tree's root, and the project it belongs to: the main checkout of the repository,
+ * so that linked worktrees (`git worktree add`, `.claude/worktrees/…`) group with it.
+ */
+export function repoInfo(cwd: string): { root: string; project: string } {
+  const [root, common] = git(cwd, ["rev-parse", "--show-toplevel", "--git-common-dir"]).trim().split("\n") as [string, string];
+  let dir = isAbsolute(common) ? common : resolve(cwd, common); // relative to cwd, not to the root
+  try {
+    dir = realpathSync(dir);
+  } catch {
+    // keep it as git printed it
+  }
+  return { root, project: basename(dir) === ".git" ? dirname(dir) : dir };
 }
 
 /** Splits `git diff -U0` output into per-file headers and hunks. */
