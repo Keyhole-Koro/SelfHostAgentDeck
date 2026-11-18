@@ -7,7 +7,8 @@ const agent = process.argv[i + 1] === "codex" ? "codex" : "claude";
 let stdin = "";
 for await (const chunk of process.stdin) stdin += chunk;
 try {
-  runHook(agent, stdin);
+  const out = runHook(agent, stdin);
+  if (out) process.stdout.write(out + "\n");
 } catch {
   // never block or fail a tool call
 }

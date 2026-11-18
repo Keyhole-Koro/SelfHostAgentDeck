@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
-import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { isAbsolute, join, relative, resolve } from "node:path";
+import { runningSessions } from "./inbox.ts";
 import type { Agent } from "./types.ts";
 
 /**
@@ -12,7 +13,11 @@ import type { Agent } from "./types.ts";
  * .git/agent-diff/log.jsonl: which session changed which file from which blob to which blob.
  * Diffing those blobs later gives exactly what the call changed — shell commands included.
  *
- * It must never get in the agent's way: it prints nothing, ignores every error and exits 0.
+ * Before Claude Code edits a file that another running session has uncommitted changes in, it
+ * tells the agent so (once per new change of the other session), through the hook's
+ * additionalContext. Otherwise it prints nothing.
+ *
+ * It must never get in the agent's way: it never blocks a call, ignores every error and exits 0.
  */
 
 export interface HookRecord {
@@ -96,7 +101,55 @@ function targetFile(input: HookInput, root: string, cwd: string): string | undef
   return rel.startsWith("..") || isAbsolute(rel) ? undefined : rel;
 }
 
-export function runHook(agent: Agent, stdin: string): void {
+/** When the file was last committed (ms), or 0. */
+function committedAt(root: string, path: string): number {
+  try {
+    return Number(git(root, ["log", "-1", "--format=%ct", "--", path]).trim()) * 1000 || 0;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * The note for a Claude session about to edit `rel` while other running sessions have uncommitted
+ * changes in it, as the hook's JSON output; undefined when there is nothing (new) to say.
+ */
+function sharedFileWarning(root: string, dir: string, rel: string, me: string, current: string | null): string | undefined {
+  if (current === headBlob(root, rel)) return undefined; // nothing uncommitted in it
+  const since = committedAt(root, rel);
+  const others = new Map<string, number>(); // session → its latest change of the file
+  for (const r of readHookRecords(root, since, 2 * 1024 * 1024)) {
+    if (r.session === me || !r.changes.some((c) => c.path === rel)) continue;
+    const key = `${r.agent}:${r.session}`;
+    others.set(key, Math.max(others.get(key) ?? 0, r.at));
+  }
+  if (!others.size) return undefined;
+  const live = runningSessions();
+  const active = [...others].filter(([k]) => live.has(k));
+  if (!active.length) return undefined;
+  const latest = Math.max(...active.map(([, at]) => at));
+  const warnedFile = join(dir, "warned.json");
+  let warned: Record<string, number> = {};
+  try {
+    warned = JSON.parse(readFileSync(warnedFile, "utf8")) as Record<string, number>;
+  } catch {
+    // first warning
+  }
+  const key = `${me}|${rel}`;
+  if ((warned[key] ?? 0) >= latest) return undefined; // already told about these changes
+  warned[key] = latest;
+  writeFileSync(warnedFile, JSON.stringify(warned));
+  const who = active.map(([k]) => `${live.get(k)} (${k.startsWith("codex:") ? "Codex" : "Claude"} ${k.split(":")[1]!.slice(0, 8)})`).join(", ");
+  return JSON.stringify({
+    hookSpecificOutput: {
+      hookEventName: "PreToolUse",
+      additionalContext: `agent-diff: ${rel} also has uncommitted changes from another running session: ${who}. Keep their edits intact, and when committing, stage only your own changes (agent-diff add --self).`,
+    },
+  });
+}
+
+/** Records the call; returns what the hook should print (only a note for Claude Code, if any). */
+export function runHook(agent: Agent, stdin: string): string | undefined {
   let input: HookInput;
   try {
     input = JSON.parse(stdin) as HookInput;
@@ -119,8 +172,16 @@ export function runHook(agent: Agent, stdin: string): void {
 
   if (event === "PreToolUse") {
     const paths = single ? [single] : dirtyPaths(root);
+    const snap = snapshot(root, paths);
     mkdirSync(join(dir, "pending"), { recursive: true });
-    writeFileSync(pendingFile, JSON.stringify(snapshot(root, paths)));
+    writeFileSync(pendingFile, JSON.stringify(snap));
+    if (single && agent === "claude") {
+      try {
+        return sharedFileWarning(root, dir, single, input.session_id, snap[single] ?? null);
+      } catch {
+        return undefined;
+      }
+    }
     return;
   }
 
@@ -158,10 +219,24 @@ export function runHook(agent: Agent, stdin: string): void {
   appendFileSync(join(dir, "log.jsonl"), JSON.stringify(record) + "\n");
 }
 
-export function readHookRecords(root: string, sinceMs = 0): HookRecord[] {
+/** The hook's records since a time; with `tailBytes`, only from the end of the log (for speed). */
+export function readHookRecords(root: string, sinceMs = 0, tailBytes?: number): HookRecord[] {
   let text: string;
   try {
-    text = readFileSync(join(recordDir(root), "log.jsonl"), "utf8");
+    const file = join(recordDir(root), "log.jsonl");
+    if (tailBytes) {
+      const size = statSync(file).size;
+      const fd = openSync(file, "r");
+      try {
+        const len = Math.min(size, tailBytes);
+        const buf = Buffer.alloc(len);
+        readSync(fd, buf, 0, len, size - len);
+        text = buf.toString("utf8");
+        if (len < size) text = text.slice(text.indexOf("\n") + 1); // drop the partial first line
+      } finally {
+        closeSync(fd);
+      }
+    } else text = readFileSync(file, "utf8");
   } catch {
     return [];
   }
