@@ -255,3 +255,18 @@ esac
     assert.equal(existsSync(log), false, "herdr was never run");
   });
 });
+
+describe("herdr: matching panes", () => {
+  it("finds a Codex thread's pane by its folder and its terminal title when herdr has no id for it", async () => {
+    const { matchPanes } = await import("../src/herdr.ts");
+    const item = (key: string, name: string, cwd: string) => ({ key, agent: "codex" as const, id: key.split(":")[1]!, name, cwd, state: "working" as const, since: 0, resume: "" });
+    const panes = [
+      { pane: "w1:p1", socket: "s", status: "blocked", agent: "codex", cwd: "/w/app", title: "Fix the login | app" },
+      { pane: "w1:p2", socket: "s", status: "idle", agent: "codex", cwd: "/w/app", title: "Write docs | app" },
+      { pane: "w1:p3", socket: "s", status: "idle", agent: "codex", cwd: "/w/other", title: "Fix the login | other" },
+    ];
+    const m = matchPanes([item("codex:a", "Fix the login", "/w/app"), item("codex:b", "Unrelated", "/w/app")], panes);
+    assert.equal(m.get("codex:a")?.pane, "w1:p1");
+    assert.equal(m.get("codex:b"), undefined, "no guess without a matching title");
+  });
+});

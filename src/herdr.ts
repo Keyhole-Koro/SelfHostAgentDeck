@@ -23,6 +23,9 @@ export interface HerdrAgent {
   /** The agent's session id or transcript path, as herdr's integration reports it. */
   session?: string;
   name?: string;
+  /** The agent's working directory and its terminal's title (Codex puts the thread's name there). */
+  cwd?: string;
+  title?: string;
 }
 
 interface AgentInfo {
@@ -31,6 +34,9 @@ interface AgentInfo {
   agent?: string | null;
   name?: string | null;
   agent_session?: { agent?: string; value?: string } | null;
+  cwd?: string | null;
+  foreground_cwd?: string | null;
+  terminal_title_stripped?: string | null;
 }
 
 const bin = () => process.env["AGENT_DIFF_HERDR"] || "herdr";
@@ -91,6 +97,9 @@ function toAgent(a: AgentInfo, socket: string): HerdrAgent {
   if (kind) agent.agent = kind;
   if (a.agent_session?.value) agent.session = a.agent_session.value;
   if (a.name) agent.name = a.name;
+  const cwd = a.foreground_cwd ?? a.cwd;
+  if (cwd) agent.cwd = cwd;
+  if (a.terminal_title_stripped) agent.title = a.terminal_title_stripped;
   return agent;
 }
 
@@ -104,13 +113,22 @@ export function herdrAgents(extraSockets: string[] = []): HerdrAgent[] {
   return cache?.agents ?? [];
 }
 
-/** The pane each listed session runs in: from its process's environment, or herdr's own session ids. */
+/**
+ * The pane each listed session runs in: from its process's environment, herdr's own session ids,
+ * or, for Codex when herdr has no id for it, the one Codex pane in the session's folder whose
+ * terminal title carries the thread's name.
+ */
 export function matchPanes(items: InboxItem[], agents: HerdrAgent[]): Map<string, HerdrAgent> {
   const out = new Map<string, HerdrAgent>();
   for (const i of items) {
     const t = i.terminal;
     let a = t ? agents.find((x) => x.pane === t.herdrPane && x.socket === t.herdrSocket) : undefined;
     a ??= agents.find((x) => !!x.session && (x.session === i.id || x.session.endsWith(`${i.id}.jsonl`)));
+    if (!a && i.agent === "codex") {
+      const here = agents.filter((x) => x.agent === "codex" && !x.session && !!i.cwd && x.cwd === i.cwd);
+      const named = here.filter((x) => !!x.title && (x.title.startsWith(i.name) || (!!i.title && x.title.startsWith(i.title))));
+      a = named.length === 1 ? named[0] : undefined;
+    }
     if (!a && t) a = { pane: t.herdrPane, socket: t.herdrSocket, status: "unknown" };
     if (a) out.set(i.key, a);
   }
