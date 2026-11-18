@@ -1,6 +1,7 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
+import { readCached } from "./transcript-cache.ts";
 import { sessionKey, type Session, type Transcripts } from "./types.ts";
 
 /**
@@ -55,12 +56,26 @@ function firstPrompt(content: unknown): string | undefined {
 }
 
 export function readClaude(into: Transcripts, sinceMs: number, root = claudeRoot()): void {
-  for (const file of transcriptFiles(root, sinceMs)) {
+  readCached("claude", transcriptFiles(root, sinceMs), parseClaudeFile, into);
+}
+
+/** The latest top-level timestamp in a line, without parsing it (keys inside tool output are escaped). */
+function lineTime(raw: string): number {
+  let at = NaN;
+  for (const m of raw.matchAll(/"timestamp":"([^"]+)"/g)) {
+    const t = Date.parse(m[1]!);
+    if (!Number.isNaN(t) && !(t <= at)) at = t;
+  }
+  return at;
+}
+
+function parseClaudeFile(file: string, into: Transcripts): void {
+  {
     let text: string;
     try {
       text = readFileSync(file, "utf8");
     } catch {
-      continue;
+      return;
     }
     let session: Session | undefined;
     let title: string | undefined;
@@ -68,7 +83,18 @@ export function readClaude(into: Transcripts, sinceMs: number, root = claudeRoot
     for (const raw of text.split("\n")) {
       // Only tool calls, titles and user prompts matter; most of a transcript is tool output and
       // attachments, so skip parsing those (session times come from the lines that are parsed).
-      if (!raw || !(raw.includes('"tool_use"') || raw.includes('"ai-title"') || raw.includes('"type":"user"'))) continue;
+      if (!raw) continue;
+      const tool = raw.includes('"tool_use"');
+      const titled = raw.includes('"ai-title"');
+      const user = raw.includes('"type":"user"');
+      if (!(tool || titled || user)) continue;
+      // Once the first prompt is known, a user line (mostly tool output, often huge) only moves the
+      // session's last activity: read its time without parsing the line.
+      if (user && !tool && !titled && prompt && session) {
+        const at = lineTime(raw);
+        if (!Number.isNaN(at)) session.lastAt = Math.max(session.lastAt, at);
+        continue;
+      }
       let line: Line;
       try {
         line = JSON.parse(raw) as Line;

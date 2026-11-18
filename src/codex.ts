@@ -1,6 +1,7 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { readCached } from "./transcript-cache.ts";
 import { sessionKey, type Session, type Transcripts } from "./types.ts";
 
 /**
@@ -69,12 +70,16 @@ interface Entry {
 }
 
 export function readCodex(into: Transcripts, sinceMs: number, root = codexRoot()): void {
-  for (const file of rolloutFiles(root, sinceMs)) {
+  readCached("codex", rolloutFiles(root, sinceMs), parseCodexFile, into);
+}
+
+function parseCodexFile(file: string, into: Transcripts): void {
+  {
     let text: string;
     try {
       text = readFileSync(file, "utf8");
     } catch {
-      continue;
+      return;
     }
     let session: Session | undefined;
     let key = "";
