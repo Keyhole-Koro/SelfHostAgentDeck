@@ -223,6 +223,12 @@ esac
     await until(() => herdrCalls().includes("agent prompt w1:p2 Open the PR"));
     await page.click('#dock [data-quick="Continue"]');
     await until(() => herdrCalls().includes("agent prompt w1:p2 Continue"));
+    await page.setInputFiles("#attach", { name: "shot.png", mimeType: "image/png", buffer: Buffer.from([0x89, 0x50, 0x4e, 0x47]) });
+    await page.waitForSelector("#dock .att");
+    await page.fill("#prompt", "Look at this");
+    await page.click('[data-act="prompt"]');
+    await until(() => herdrCalls().some((l) => l.includes("Look at this")) && herdrCalls().some((l) => /\.agent-deck\/uploads\/\d{8}-\d{6}-shot\.png/.test(l)));
+    assert.equal(await page.locator("#dock .att").count(), 0, "sent with the prompt");
     await page.click('[data-tab="changes"]');
     await page.waitForSelector(".comment-btn");
     await page.locator(".comment-btn").first().click();

@@ -220,6 +220,11 @@ button.opt:hover { border-color: var(--accent); color: var(--accent); }
 .composer:focus-within { border-color: var(--accent); }
 .composer textarea { flex: 1; min-width: 0; border: 0; background: transparent; resize: none; outline: none; padding: 5px 0; line-height: 1.5; max-height: 35vh; }
 .hint { margin: 6px 2px 0; }
+.attached { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
+.att { display: inline-flex; align-items: center; gap: 2px; border: 1px solid var(--line); border-radius: 8px; padding: 2px 2px 2px 9px; font-size: 12px; max-width: 240px; }
+.att .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.att button { border: 0; background: none; cursor: pointer; color: var(--muted); font-size: 15px; padding: 0 6px; }
+.btn.icon { padding: 4px 11px; font-size: 17px; line-height: 1.2; }
 .sub { color: var(--muted); font-size: 12px; }
 .note { color: var(--muted); font-size: 14px; margin: 6px 0; }
 .note:empty { display: none; }
@@ -422,6 +427,7 @@ let shown = {}; // what each part shows, to repaint only on change
 const views = new Map(); // `${repo}|${range}` → { at, view }
 const screens = new Map(); // session → its herdr screen, once asked for
 const drafts = new Map(); // session → the prompt being written
+const attached = new Map(); // session → files sent for its next prompt: [{ name, path }]
 const TABS = ["chat", "changes", "files", "details"];
 /** Phones show the list or a session; wide screens show the details beside the conversation. */
 const phone = matchMedia("(max-width: 699px)");
@@ -976,7 +982,7 @@ function stepsHtml(steps, last) {
 
 function paintDock(e) {
   const i = e && e.item;
-  const key = i ? JSON.stringify([i.key, i.state, !!i.herdr, i.reason, i.questions, i.plan, i.hold, quick]) : e ? e.key : "";
+  const key = i ? JSON.stringify([i.key, i.state, !!i.herdr, i.reason, i.questions, i.plan, i.hold, quick, attached.get(i.key)]) : e ? e.key : "";
   if (key === shown.dock) return;
   shown.dock = key;
   let html = "";
@@ -984,7 +990,9 @@ function paintDock(e) {
   if (i && i.herdr && i.state !== "needs-answer") {
     if (i.state === "your-turn" && !i.hold) html += `<div class="quick">${quick.map((q) => `<button class="chip-btn" data-quick="${esc(q)}">${esc(q)}</button>`).join("")}<button class="chip-btn ghost" data-act="edit-quick" title="Change these replies">✎</button></div>`;
     const stop = i.state === "working" ? `<button class="btn" data-key-press="esc" title="Interrupt it (Esc)">Stop</button>` : "";
-    html += `<div class="composer"><textarea id="prompt" rows="1" aria-label="Message to the session" placeholder="${i.state === "working" ? "Queue a message" : "Reply"}" title="Ctrl+Enter sends">${esc(drafts.get(i.key) || "")}</textarea>${stop}<button class="btn primary" data-act="prompt">Send</button></div>`;
+    const files = attached.get(i.key) || [];
+    if (files.length) html += `<div class="attached">${files.map((f, n) => `<span class="att" title="${esc(f.path)}"><span class="nm">${esc(f.name)}</span><button data-unattach="${n}" aria-label="Do not send ${esc(f.name)}">×</button></span>`).join("")}</div>`;
+    html += `<div class="composer"><button class="btn icon" data-act="attach" title="Send files: photos, logs, documents" aria-label="Send files">+</button><input type="file" id="attach" multiple hidden><textarea id="prompt" rows="1" aria-label="Message to the session" placeholder="${i.state === "working" ? "Queue a message" : "Reply"}" title="Ctrl+Enter sends">${esc(drafts.get(i.key) || "")}</textarea>${stop}<button class="btn primary" data-act="prompt">Send</button></div>`;
     if (i.state === "working") html += `<p class="sub hint">It is working; your message waits in its queue.</p>`;
   } else if (i && !i.herdr && (waiting(i) || i.state === "needs-answer")) {
     html += `<p class="note">To answer from this page, run it in a <a href="https://herdr.dev" target="_blank" rel="noopener">herdr</a> pane. Or go back to it: <code class="cmd">${esc(i.resume)}</code> <button class="btn small" data-copy="${esc(i.resume)}">Copy</button></p>`;
@@ -1511,10 +1519,15 @@ async function act(name, el) {
       if ($("screen")) $("screen").scrollTop = $("screen").scrollHeight;
     } else if (name === "prompt") {
       const text = $("prompt").value.trim();
-      if (!text) return;
-      await sendPrompt(i, text);
+      const files = attached.get(i.key) || [];
+      if (!text && !files.length) return;
+      await sendPrompt(i, files.length ? `${text}\n\nFiles I sent you:\n${files.map((f) => `- ${f.path}`).join("\n")}`.trim() : text);
       drafts.delete(i.key);
+      attached.delete(i.key);
       if ($("prompt")) ($("prompt").value = ""), grow($("prompt"));
+      paintDock(entry(selected));
+    } else if (name === "attach") {
+      $("attach").click();
     } else if (name === "quick") {
       await sendPrompt(i, el.dataset.quick);
     } else if (name === "edit-quick") {
@@ -1542,6 +1555,26 @@ async function act(name, el) {
   } catch (e) {
     note(name === "prompt" || name === "screen" ? "answer-note" : name.endsWith("review") ? "review-note" : "act-note", e.message, false);
   }
+}
+
+function setNote(id, text, ok) {
+  const n = $(id);
+  if (n) ((n.textContent = text), (n.className = "note" + (ok ? " ok" : " error")));
+}
+
+/** Uploads files into the session's repository, to go with its next prompt. */
+async function uploadFiles(i, list) {
+  for (const f of list) {
+    setNote("answer-note", `Sending ${f.name}…`, true);
+    try {
+      const up = await api(`/api/upload?key=${encodeURIComponent(i.key)}`, { method: "POST", body: f, headers: { "content-type": "application/octet-stream", "x-file-name": encodeURIComponent(f.name) } });
+      attached.set(i.key, [...(attached.get(i.key) || []), { name: f.name, path: up.path }]);
+    } catch (e) {
+      setNote("answer-note", `${f.name}: ${e.message}`, false);
+      return;
+    }
+  }
+  paintDock(entry(selected));
 }
 
 async function sendPrompt(i, text) {
@@ -1626,6 +1659,13 @@ $("app").addEventListener("click", (ev) => {
   if (k) return void pressKey(k.dataset.keyPress);
   const q = t.closest("[data-quick]");
   if (q) return void act("quick", q);
+  const un1 = t.closest("[data-unattach]");
+  if (un1) {
+    const list = (attached.get(selected) || []).filter((_, n) => n !== Number(un1.dataset.unattach));
+    if (list.length) attached.set(selected, list);
+    else attached.delete(selected);
+    return void paintDock(entry(selected));
+  }
   const c = t.closest("[data-comment]");
   if (c) {
     const ed = [...document.querySelectorAll("[data-editor]")].find((x) => x.dataset.editor === c.dataset.comment);
@@ -1687,6 +1727,10 @@ $("chat").addEventListener("scroll", () => {
 $("app").addEventListener("keydown", (ev) => {
   if (ev.target.id === "custom" && ev.key === "Enter") setRange(rangeFromInput(ev.target.value));
   if (ev.target.id === "prompt" && ev.key === "Enter" && (ev.ctrlKey || ev.metaKey)) act("prompt");
+});
+$("app").addEventListener("change", (ev) => {
+  const i = entry(selected) && entry(selected).item;
+  if (ev.target.id === "attach" && i && ev.target.files.length) void uploadFiles(i, [...ev.target.files]);
 });
 $("app").addEventListener("input", (ev) => {
   if (ev.target.id === "prompt") {
