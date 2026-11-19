@@ -333,6 +333,16 @@ pre.code.numbered code { counter-reset: ln; display: block; min-width: max-conte
 .doc { max-width: 760px; }
 img.shot { max-width: 100%; height: auto; border-radius: 8px; border: 1px solid var(--line); }
 .att img { width: 28px; height: 28px; object-fit: cover; border-radius: 4px; margin-right: 6px; vertical-align: middle; }
+.search-box input { width: 100%; font: inherit; font-size: 16px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--field); color: var(--text); }
+.results { list-style: none; padding: 0; margin: 14px 0 0; display: grid; gap: 14px; }
+.result .r-head { margin-bottom: 4px; }
+.result .hit { display: block; width: 100%; text-align: left; font: inherit; font-size: 13px; color: inherit; background: none; border: 0; border-left: 2px solid var(--line); padding: 3px 0 3px 10px; margin: 3px 0; cursor: pointer; overflow-wrap: anywhere; }
+div.hit { cursor: default; }
+button.hit:hover { border-left-color: var(--accent); background: var(--hover); }
+.hit .who { color: var(--muted); margin-right: 6px; font-size: 12px; }
+.hit mark { background: var(--accent-soft); color: inherit; border-radius: 2px; }
+.r-closed { margin-top: 4px; overflow-wrap: anywhere; }
+.msg.found > * { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 8px; transition: outline-color 1s; }
 .dropping { outline: 2px dashed var(--accent); outline-offset: -4px; border-radius: 10px; }
 /* Images in the conversation: a fixed height, so the conversation does not jump as they come in. */
 .pics { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
@@ -510,6 +520,7 @@ body.pip { height: auto; min-height: 100vh; overflow: auto; display: block; }
     <span class="limits optional" id="limits"></span>
     <div class="seg" id="layouts" role="group" aria-label="Layout"></div>
     <button class="btn primary new-btn" id="new" title="Start Claude Code or Codex in a new herdr tab"><span data-icon="plus"></span><span class="lbl">New session</span></button>
+    <button class="icon-btn" id="search" title="Search what was said in every session (Ctrl+K)" aria-label="Search" data-icon="search"></button>
     <button class="icon-btn" id="activity" title="Activity: what happened in every session" aria-label="Activity" data-icon="activity"></button>
     <button class="icon-btn" id="notify" aria-pressed="false" title="Notifications when a session waits on you, also with the page closed" aria-label="Notifications" data-icon="bell"></button>
     <details class="menu" id="more"><summary class="icon-btn" title="More" aria-label="More" data-icon="more"></summary><div class="menu-list">
@@ -603,6 +614,7 @@ const $ = (id) => document.getElementById(id);
 /** Line icons, drawn for this page (24 × 24, stroked with the text colour). */
 const ICONS = {
   plus: '<path d="M12 5v14M5 12h14"/>',
+  search: '<circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.3-4.3"/>',
   activity: '<circle cx="5" cy="6" r="1.3"/><circle cx="5" cy="12" r="1.3"/><circle cx="5" cy="18" r="1.3"/><path d="M9.5 6H20M9.5 12H20M9.5 18H16"/>',
   bell: '<path d="M6.5 16v-5a5.5 5.5 0 0 1 11 0v5l1.5 2h-14z"/><path d="M10 21h4"/>',
   more: '<circle cx="5.5" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="18.5" cy="12" r="1.2"/>',
@@ -651,7 +663,7 @@ const kTokens = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : `${Math.round(n 
 const bytes = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)} MB` : n >= 1e3 ? `${Math.round(n / 1e3)} KB` : `${n} B`);
 const nameOf = (i) => i.title || i.name;
 /** The views that are not a session: the activity, clean-up and remote access. */
-const SPECIAL = ["new", "activity", "cleanup", "remote"];
+const SPECIAL = ["new", "search", "activity", "cleanup", "remote"];
 const EFFORTS = ["low", "medium", "high", "xhigh", "max"];
 let lastSession = null; // the session picked before a view that is not one
 const special = () => SPECIAL.includes(selected);
@@ -1160,6 +1172,7 @@ function paintChat(scroll) {
   const top = box.scrollTop;
   $("chat-col").innerHTML = chatHtml();
   loadPictures($("chat-col"));
+  if (seeking) requestAnimationFrame(seek);
   if (scroll === "bottom" || (scroll === "follow" && atEnd)) box.scrollTop = box.scrollHeight;
   else if (scroll === "keep") box.scrollTop = top + (box.scrollHeight - height);
 }
@@ -1244,9 +1257,9 @@ function msgHtml(m) {
     const text = m.text || "";
     const long = text.length > 700 || text.split("\n").length > 12;
     const body = m.kind === "command" || m.kind === "shell" ? `<code>${esc(text)}</code>` : linkify(text);
-    return `<div class="msg me${m.kind ? " " + esc(m.kind) : ""}"${t}><div class="bubble${long ? " long" : ""}">${body}${cut}${m.images ? picsHtml(m.images) : ""}</div>${long ? '<button class="linkish more-btn" data-act="expand">Show all</button>' : ""}</div>`;
+    return `<div class="msg me${m.kind ? " " + esc(m.kind) : ""}" data-mid="${esc(m.id)}"${t}><div class="bubble${long ? " long" : ""}">${body}${cut}${m.images ? picsHtml(m.images) : ""}</div>${long ? '<button class="linkish more-btn" data-act="expand">Show all</button>' : ""}</div>`;
   }
-  if (m.role === "assistant") return `<div class="msg ai"${t}><div class="md">${markdown(m.text)}</div>${cut}</div>`;
+  if (m.role === "assistant") return `<div class="msg ai" data-mid="${esc(m.id)}"${t}><div class="md">${markdown(m.text)}</div>${cut}</div>`;
   if (m.kind === "recap") return `<div class="recap"${t}><div class="label">While you were away</div><div class="md">${markdown(m.text)}</div></div>`;
   if (m.kind === "summary") return `<details class="event-box"${t}><summary>The conversation before, summarized</summary><div class="md">${markdown(m.text)}</div></details>`;
   if (m.kind === "output") return `<details class="event-box"${t}><summary>Output</summary><pre><code>${esc(m.text)}</code></pre></details>`;
@@ -1805,6 +1818,87 @@ async function paintActivity() {
   $("special").innerHTML = html + `</ol>`;
 }
 
+// ------------------------------------------------------------ search
+
+let searchQuery = "";
+let searchTimer = 0;
+let searching = 0; // which search the results are of: an older answer must not cover a newer one
+/** A message search found, to scroll to once its session's conversation shows: { key, id, tries }. */
+let seeking = null;
+
+function paintSearch() {
+  const sub = "What you and the agents said in the last 30 days, in every session: running ones, and closed ones too.";
+  $("special").innerHTML = pageHead("Search", sub) + `<div class="search-box"><input id="search-q" type="search" placeholder="Words to find, e.g. WIF deploy" aria-label="Search" autocomplete="off" value="${esc(searchQuery)}"></div><div id="search-results"></div>`;
+  const q = $("search-q");
+  q.focus();
+  q.setSelectionRange(q.value.length, q.value.length);
+  if (searchQuery) void runSearch();
+}
+
+async function runSearch() {
+  const q = searchQuery.trim();
+  const n = ++searching;
+  const box = $("search-results");
+  if (!box) return;
+  if (!q) return void (box.innerHTML = "");
+  box.innerHTML = `<p class="note">Searching…${n === 1 ? " The first search reads every conversation once; it can take a little while." : ""}</p>`;
+  let r;
+  try {
+    r = await api(`/api/search?q=${encodeURIComponent(q)}`);
+  } catch (e) {
+    if (n === searching && $("search-results")) $("search-results").innerHTML = `<p class="note error">${esc(e.message)}</p>`;
+    return;
+  }
+  if (n !== searching || !$("search-results")) return;
+  $("search-results").innerHTML = r.results.length ? `<ol class="results">${r.results.map((x) => resultHtml(x, q)).join("")}</ol>` : `<p class="note">Nothing found in the last 30 days.</p>`;
+}
+
+/** Escaped text with the words searched for marked. */
+function marked(text, q) {
+  const words = q.split(/\s+/).filter(Boolean).map((w) => esc(w).replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  const html = esc(text);
+  return words.length ? html.replace(new RegExp(`(${words.join("|")})`, "gi"), "<mark>$1</mark>") : html;
+}
+
+function resultHtml(x, q) {
+  const who = (role) => (role === "user" ? "You" : agentName(x.agent));
+  const where = [agentName(x.agent), x.cwd ? base(x.cwd) : "", x.at ? age(x.at) : ""].filter(Boolean).map(esc).join(" · ");
+  const title = esc(x.title || x.id.slice(0, 8));
+  let html = `<li class="result"><div class="r-head">${x.listed ? `<button class="linkish" data-hit="${esc(x.hits[0].id)}" data-key="${esc(x.key)}">${title}</button>` : `<b>${title}</b>`} <span class="sub">${where}</span></div>`;
+  html += x.hits.map((h) => `<${x.listed ? `button class="hit" data-hit="${esc(h.id)}" data-key="${esc(x.key)}"` : `div class="hit"`}><span class="who">${who(h.role)}</span>${marked(plain(h.snippet), q)}</${x.listed ? "button" : "div"}>`).join("");
+  if (!x.listed) html += `<div class="sub r-closed">Not running now. Open it again: <code class="cmd">${esc(x.resume)}</code> <button class="btn small" data-copy="${esc(x.resume)}">Copy</button></div>`;
+  return html + `</li>`;
+}
+
+/** Scrolls the conversation to the message search found, reading earlier pages until it shows. */
+function seek() {
+  const s = seeking;
+  if (!s || chat.key !== s.key || chat.state !== "ready") return;
+  const el = [...document.querySelectorAll("#chat [data-mid]")].find((m) => m.dataset.mid === s.id);
+  if (el) {
+    seeking = null;
+    el.scrollIntoView({ block: "center" });
+    el.classList.add("found");
+    setTimeout(() => el.classList.remove("found"), 2500);
+  } else if (chat.before !== undefined && s.tries++ < 20) void loadChat("earlier");
+  else seeking = null;
+}
+
+$("special").addEventListener("input", (ev) => {
+  if (ev.target.id !== "search-q") return;
+  searchQuery = ev.target.value;
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(runSearch, 350);
+});
+document.addEventListener("keydown", (ev) => {
+  if ((ev.ctrlKey || ev.metaKey) && !ev.altKey && ev.key.toLowerCase() === "k") {
+    ev.preventDefault();
+    if (selected === "search") return $("search-q") && $("search-q").focus();
+    if (currentLayout !== "focus") setLayout("focus");
+    openSession("search");
+  }
+});
+
 // ------------------------------------------------------------ clean up
 
 const pageHead = (title, sub) => `<div class="page-head"><h2><button class="icon-btn back" data-act="back" aria-label="Back to the sessions">${icon("back", 22)}</button>${title}</h2>${sub ? `<p class="page-sub">${sub}</p>` : ""}</div>`;
@@ -2292,7 +2386,7 @@ function select(key) {
     paintHeader();
     paintNav();
     layout();
-    void (key === "new" ? paintNew() : key === "activity" ? paintActivity() : key === "cleanup" ? paintCleanup() : paintRemote());
+    void (key === "new" ? paintNew() : key === "search" ? paintSearch() : key === "activity" ? paintActivity() : key === "cleanup" ? paintCleanup() : paintRemote());
   } else paint();
 }
 
@@ -2597,6 +2691,13 @@ $("app").addEventListener("click", (ev) => {
     void openFiles(o.dataset.open);
     if (tab !== "files") setTab("files");
     return;
+  }
+  const hit = t.closest("[data-hit]");
+  if (hit) {
+    seeking = { key: hit.dataset.key, id: hit.dataset.hit, tries: 0 };
+    if (tab !== "chat") setTab("chat");
+    openSession(hit.dataset.key);
+    return void requestAnimationFrame(seek);
   }
   const go = t.closest("[data-goto]");
   if (go) return void openSession(go.dataset.goto);

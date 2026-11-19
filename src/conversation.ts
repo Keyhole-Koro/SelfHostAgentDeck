@@ -95,6 +95,45 @@ export function readChat(file: string, agent: Agent, opts: ChatOptions = {}): Ch
   }
 }
 
+/** What a transcript says, as text, from `from` to its last complete line: for searching it. */
+export interface TextScan {
+  /** Your messages and its replies (not commands, answers or steps). */
+  messages: ChatMessage[];
+  /** Where the last complete line ends: read on from there next time. */
+  end: number;
+  title?: string;
+  cwd?: string;
+}
+
+export function textMessages(file: string, agent: Agent, from = 0): TextScan {
+  const fd = openSync(file, "r");
+  try {
+    const size = fstatSync(fd).size;
+    const out: TextScan = { messages: [], end: from };
+    const parse = agent === "codex" ? codexParts : claudeParts;
+    for (const line of forwards(fd, from, size)) {
+      out.end = line.end;
+      const t = line.text;
+      if (!out.cwd) {
+        const m = /"cwd":("(?:[^"\\]|\\.)*")/.exec(t.slice(0, 8000));
+        if (m) out.cwd = JSON.parse(m[1]!) as string;
+      }
+      if (agent === "claude" && t.length < 20_000 && /"type":"(ai-title|custom-title)"/.test(t)) {
+        try {
+          const d = JSON.parse(t) as { aiTitle?: string; customTitle?: string };
+          out.title = d.customTitle || d.aiTitle || out.title;
+        } catch {
+          // a line being written
+        }
+      }
+      for (const p of parse(t, line.start)) if ((p.role === "user" || p.role === "assistant") && !(p as ChatMessage).kind && (p as ChatMessage).text) out.messages.push(p as ChatMessage);
+    }
+    return out;
+  } finally {
+    closeSync(fd);
+  }
+}
+
 /** Marks the steps that failed, and drops Codex's older tool records where its newer ones exist. */
 function link(parts: Part[]): ChatMessage[] {
   const tools = new Map<string, Tool>();

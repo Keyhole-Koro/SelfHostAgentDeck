@@ -10,6 +10,7 @@ import { ciFailure } from "./ci.ts";
 import { cleanup } from "./cleanup.ts";
 import { findConflicts } from "./conflicts.ts";
 import { chatImage, readChat } from "./conversation.ts";
+import { search, warmSearch } from "./search.ts";
 import { parseSince } from "./core.ts";
 import { FileError, filesRoot, image, look } from "./files.ts";
 import { icon } from "./icon.ts";
@@ -420,6 +421,9 @@ export async function serve(opts: ServeOptions): Promise<Served> {
   };
   setInterval(watch, Number(env("WATCH_MS")) || 15_000).unref();
   setTimeout(watch, 1000).unref();
+  // The search reads the transcripts' text once (gigabytes of them, some seconds): soon after the
+  // start, while no one waits for it.
+  setTimeout(() => void warmSearch().catch(() => {}), 15_000).unref();
 
   /** A session the page listed: only those can be read. */
   const listed = (key: unknown): InboxItem => {
@@ -579,6 +583,12 @@ export async function serve(opts: ServeOptions): Promise<Served> {
       if (!file) return json(res, 200, { messages: [], end: 0 });
       const limit = offset(url, "limit");
       return json(res, 200, readChat(file, item.agent, { before: offset(url, "before"), after: offset(url, "after"), ...(limit && { limit: Math.min(limit, 100) }), ...(item.cwd && { cwd: item.cwd }) }));
+    }
+    if (req.method === "GET" && url.pathname === "/api/search") {
+      const q = (url.searchParams.get("q") ?? "").trim();
+      if (q.length > 200) throw new FileError("Search for fewer words.", 400);
+      const listedKeys = new Set((last ?? currentInbox()).items.map((i) => i.key));
+      return json(res, 200, { results: (await search(q)).map((r) => ({ ...r, listed: listedKeys.has(r.key) })) });
     }
     if (req.method === "GET" && url.pathname === "/api/chat/image") {
       const item = listed(url.searchParams.get("key"));

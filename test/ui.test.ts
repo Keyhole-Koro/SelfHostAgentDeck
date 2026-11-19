@@ -122,7 +122,7 @@ describe("page", { skip: (!chromium && "no browser") || (process.platform !== "l
 
     writeFileSync(join(repo, "notes.md"), "# Release notes\n\n- due dates\n");
     writeFileSync(join(repo, ".env"), "TOKEN=secret");
-    const chatty: object[] = [{ type: "ai-title", aiTitle: "Long talk" }];
+    const chatty: object[] = [{ type: "ai-title", aiTitle: "Long talk" }, { type: "user", message: { content: "Where did the zebra crossing go?" } }];
     for (let n = 0; n < 45; n++) chatty.push({ type: "user", message: { content: `question ${n}` } }, { type: "assistant", message: { content: [{ type: "text", text: `answer ${n}` }] } });
     const dot = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="; // 1×1 PNG
     chatty.push({ type: "user", message: { content: [{ type: "image", source: { type: "base64", media_type: "image/png", data: dot } }, { type: "text", text: "[Image #1] look at this" }] } });
@@ -131,6 +131,7 @@ describe("page", { skip: (!chromium && "no browser") || (process.platform !== "l
     transcript("chatty", chatty);
     running("chatty", proc("w1:p3"), { status: "idle", statusUpdatedAt: Date.now() - 60_000 });
 
+    transcript("gone", [{ type: "ai-title", aiTitle: "Zebra plan" }, { type: "user", message: { content: "Plan the zebra migration" } }]); // closed: no process
     transcript("old", [{ type: "ai-title", aiTitle: "Old idea" }]);
     running("old", proc(), { status: "idle", statusUpdatedAt: Date.now() - 5 * 864e5 });
 
@@ -503,6 +504,23 @@ esac
     await until(() => herdrCalls().some((l) => l === `agent start ${l.split(" ")[2]} --kind claude --pane w9:p1 --timeout 60000 -- --resume ${id}`));
     await until(() => elsewhere.signal() === 15);
     assert.ok(herdrCalls().findIndex((l) => l.startsWith("workspace create")) < herdrCalls().findIndex((l) => l.includes(`--resume ${id}`)));
+  });
+
+  it("finds what was said in any session, and opens the conversation where it was said", async () => {
+    await page.click('#layouts [data-layout="focus"]').catch(() => {});
+    await page.click("#search");
+    await page.fill("#search-q", "ZEBRA");
+    await page.waitForSelector("#search-results .result");
+    const results = page.locator("#search-results .result");
+    assert.equal(await results.count(), 2);
+    const closed = results.filter({ hasText: "Zebra plan" });
+    assert.match(await closed.innerText(), /Not running now[\s\S]*claude --resume gone/);
+    assert.equal(await closed.locator("button.hit").count(), 0, "a closed one cannot be opened here");
+    assert.equal(await page.locator("#search-results mark").first().innerText(), "zebra");
+    // The message is pages back: the conversation reads back to it and shows it.
+    await results.filter({ hasText: "Long talk" }).locator("button.hit").click();
+    await page.waitForSelector("#chat .msg.found", { timeout: 10_000 });
+    assert.match(await page.locator("#chat .msg.found").innerText(), /zebra crossing/);
   });
 
   it("logged no errors", () => {
