@@ -71,6 +71,8 @@ export interface Served {
 }
 
 const PAGE = join(import.meta.dirname, "viewer.html");
+/** The page's Markdown renderer, inlined into its script (one nonce, one request). */
+const MARKDOWN = join(import.meta.dirname, "markdown.js");
 
 interface Place {
   /** The working tree's root; null outside a repository. */
@@ -186,7 +188,8 @@ function html(res: ServerResponse, body: string, nonce: string): void {
 function viewerPage(nonce: string, mode: "local" | "remote"): string {
   return readFileSync(PAGE, "utf8")
     .replace("<head>", `<head>\n<meta name="agent-diff-mode" content="${mode}">`)
-    .replace("<script>", `<script nonce="${nonce}">`);
+    .replace("<script>", `<script nonce="${nonce}">`)
+    .replace("/*@markdown*/", () => readFileSync(MARKDOWN, "utf8"));
 }
 
 async function body(req: IncomingMessage): Promise<Record<string, unknown>> {

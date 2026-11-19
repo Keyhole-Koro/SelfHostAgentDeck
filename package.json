@@ -13,7 +13,7 @@
     "node": ">=22.18"
   },
   "scripts": {
-    "build": "rm -rf dist && tsc -p tsconfig.build.json && cp src/viewer.html dist/",
+    "build": "rm -rf dist && tsc -p tsconfig.build.json && cp src/viewer.html src/markdown.js dist/",
     "prepack": "npm run build",
     "test": "node --test test/*.test.ts",
     "typecheck": "tsc -p .",
