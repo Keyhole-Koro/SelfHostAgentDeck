@@ -262,6 +262,11 @@ button.opt:hover { border-color: var(--accent); color: var(--accent); }
 .btn.icon { padding: 4px 11px; font-size: 17px; line-height: 1.2; }
 .sub { color: var(--muted); font-size: 12px; }
 .note { color: var(--muted); font-size: 14px; margin: 6px 0; }
+.outside { display: grid; gap: 8px; padding: 12px 14px; border: 1px dashed var(--line); border-radius: 12px; margin: 4px 0; }
+.outside p { margin: 0; }
+.outside .btn { display: inline-flex; align-items: center; gap: 6px; padding: 6px 14px; }
+.card-outside { margin: 0; font-size: 13px; color: var(--muted); }
+.card-outside button { font: inherit; color: var(--accent); background: none; border: 0; padding: 0; cursor: pointer; text-decoration: underline; }
 .note:empty { display: none; }
 .note.ok { color: var(--ok); }
 .note.error, .error { color: var(--del-text); }
@@ -1196,9 +1201,37 @@ function stepsHtml(steps, last) {
 
 // ------------------------------------------------------------ dock: answering through herdr
 
+/** Can be closed where it runs and opened again in herdr (see move.ts). */
+const movable = (i) => !!(inbox && inbox.herdrRunning && i.pid && !i.herdr && (i.agent === "claude" || i.agent === "codex"));
+
+/** Why the page cannot reply to a session outside herdr, and the way to bring it in. */
+function outsideHtml(i) {
+  const where = esc(i.runsIn || "another terminal");
+  let html = `<div class="outside"><p><b>No replies from here:</b> the page types into sessions through herdr, and this one runs in ${where}.</p>`;
+  if (movable(i) && i.state === "your-turn") html += `<p><button class="btn primary" data-act="move">${icon("goto", 16)}<span>Continue in herdr</span></button></p><p class="sub">It closes in ${where} and opens again in a new herdr tab, with the same conversation.</p>`;
+  else if (movable(i)) html += `<p class="sub">${i.state === "working" ? "Once it finishes this turn" : `Once you answer it in ${where}`}, you can move it into herdr from here.</p>`;
+  else if (!inbox.herdrRunning) html += `<p class="sub">Start <a href="https://herdr.dev" target="_blank" rel="noopener">herdr</a> on that computer to move it there.</p>`;
+  html += `<p class="sub">Or go back to it there: <code class="cmd">${esc(i.resume)}</code> <button class="btn small" data-copy="${esc(i.resume)}">Copy</button></p></div>`;
+  return html;
+}
+
+/** After a move: the session shows up again from its herdr pane, under the same key. */
+async function untilInHerdr(key) {
+  for (const until = Date.now() + 90_000; Date.now() < until; ) {
+    await new Promise((r) => setTimeout(r, 1500));
+    await loadInbox();
+    const e = entry(key);
+    if (e && e.item && e.item.herdr) {
+      if (selected !== key) select(key);
+      return true;
+    }
+  }
+  return false;
+}
+
 function paintDock(e) {
   const i = e && e.item;
-  const key = i ? JSON.stringify([i.key, i.state, !!i.herdr, i.reason, i.questions, i.plan, i.hold, quick, attached.get(i.key)]) : e ? e.key : "";
+  const key = i ? JSON.stringify([i.key, i.state, !!i.herdr, i.reason, i.questions, i.plan, i.hold, quick, attached.get(i.key), i.runsIn, !!i.pid, inbox.herdrRunning]) : e ? e.key : "";
   if (key === shown.dock) return;
   shown.dock = key;
   let html = "";
@@ -1214,8 +1247,8 @@ function paintDock(e) {
     if (files.length) html += `<div class="attached">${files.map((f, n) => `<span class="att" title="${esc(f.path)}"><span class="nm">${esc(f.name)}</span><button data-unattach="${n}" aria-label="Do not send ${esc(f.name)}">×</button></span>`).join("")}</div>`;
     html += `<div class="composer"><button class="icon-btn" data-act="attach" title="Send files: photos, logs, documents" aria-label="Send files">${icon("plus", 20)}</button><input type="file" id="attach" multiple hidden><textarea id="prompt" rows="1" aria-label="Message to the session" placeholder="${i.state === "working" ? "Queue a message" : "Reply"}" title="Ctrl+Enter sends">${esc(drafts.get(i.key) || "")}</textarea>${stop}<button class="send-btn" data-act="prompt" title="Send (Ctrl+Enter)" aria-label="Send">${icon("send")}</button></div>`;
     if (i.state === "working") html += `<p class="sub hint">It is working; your message waits in its queue.</p>`;
-  } else if (i && !i.herdr && (waiting(i) || i.state === "needs-answer")) {
-    html += `<p class="note">To answer from this page, run it in a <a href="https://herdr.dev" target="_blank" rel="noopener">herdr</a> pane. Or go back to it: <code class="cmd">${esc(i.resume)}</code> <button class="btn small" data-copy="${esc(i.resume)}">Copy</button></p>`;
+  } else if (i && !i.herdr && i.state !== "stale") {
+    html += outsideHtml(i);
   }
   $("dock").parentElement.hidden = !html;
   $("dock").innerHTML = html + `<p class="note" id="answer-note"></p>`;
@@ -1903,7 +1936,7 @@ function cards(container, items, size = "tile") {
     if (!el) {
       el = doc.createElement("article");
       el.dataset.card = i.key;
-      el.innerHTML = `<header class="card-head"></header><div class="card-meta"></div><div class="card-body"></div><div class="card-ask"></div><div class="card-reply"><div class="card-quick"></div><form class="card-form" data-card-form><input class="card-input" aria-label="Reply to ${esc(nameOf(i))}" placeholder="${i.state === "working" ? "Queue a message" : "Reply"}" autocomplete="off"><button class="send-btn small" aria-label="Send">${icon("send", 16)}</button></form><p class="card-note"></p></div>`;
+      el.innerHTML = `<header class="card-head"></header><div class="card-meta"></div><div class="card-body"></div><div class="card-ask"></div><div class="card-reply"><div class="card-quick"></div><form class="card-form" data-card-form><input class="card-input" aria-label="Reply to ${esc(nameOf(i))}" placeholder="${i.state === "working" ? "Queue a message" : "Reply"}" autocomplete="off"><button class="send-btn small" aria-label="Send">${icon("send", 16)}</button></form><p class="card-outside"></p><p class="card-note"></p></div>`;
     }
     if (el !== before) container.insertBefore(el, before);
     before = el.nextElementSibling;
@@ -1913,7 +1946,10 @@ function cards(container, items, size = "tile") {
     setPart(el.querySelector(".card-body"), cardBody(i, size), true);
     setPart(el.querySelector(".card-ask"), cardAsk(i));
     setPart(el.querySelector(".card-quick"), cardQuick(i));
-    el.querySelector(".card-reply").hidden = !i.herdr || i.state === "needs-answer";
+    const outside = !i.herdr && i.state !== "stale";
+    el.querySelector(".card-reply").hidden = i.herdr ? i.state === "needs-answer" : !outside;
+    el.querySelector(".card-form").hidden = el.querySelector(".card-quick").hidden = !i.herdr;
+    setPart(el.querySelector(".card-outside"), outside ? `No replies from here: it runs in ${esc(i.runsIn || "another terminal")}, outside herdr.${movable(i) ? ` <button data-card-open>Open it</button> to move it into herdr.` : ""}` : "");
   }
 }
 
@@ -2225,6 +2261,14 @@ async function act(name, el) {
       attached.delete(i.key);
       if ($("prompt")) ($("prompt").value = ""), grow($("prompt"));
       paintDock(entry(selected));
+    } else if (name === "move") {
+      const where = i.runsIn || "its terminal";
+      if (!confirm(`Continue "${nameOf(i)}" in herdr?\n\nIt closes in ${where} and opens again in a new herdr tab, with the same conversation. Then you can reply to it from here.`)) return;
+      el.disabled = true;
+      note("answer-note", "Moving it into herdr…", true);
+      const r = await post("/api/move", { key: i.key });
+      note("answer-note", "It is in herdr now; opening it…", true);
+      if (!(await untilInHerdr(r.key || i.key))) note("answer-note", "herdr opened it, but it has not shown up here yet.", false);
     } else if (name === "attach") {
       $("attach").click();
     } else if (name === "ns-attach") {
@@ -2261,7 +2305,8 @@ async function act(name, el) {
       paint();
     }
   } catch (e) {
-    note(name === "prompt" || name === "screen" ? "answer-note" : name.endsWith("review") ? "review-note" : "act-note", e.message, false);
+    if (name === "move") el.disabled = false;
+    note(name === "prompt" || name === "screen" || name === "move" ? "answer-note" : name.endsWith("review") ? "review-note" : "act-note", e.message, false);
   }
 }
 

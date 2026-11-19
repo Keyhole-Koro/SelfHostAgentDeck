@@ -432,6 +432,25 @@ esac
     await page.click('#layouts [data-layout="focus"]');
   });
 
+  it("says why a session in another terminal has no reply box, and moves it into herdr", async () => {
+    const id = "0a7e5c1d-0000-4000-8000-00000000000a";
+    // Claude Code in a terminal tab outside herdr: a process named so, in no herdr pane.
+    const elsewhere = spawn("bash", ["-c", "exec -a claude-standin sleep 120"], { stdio: "ignore" });
+    kids.push(elsewhere);
+    transcript(id, [{ type: "ai-title", aiTitle: "Elsewhere" }]);
+    running(id, elsewhere.pid!, { status: "idle" });
+    await page.click(`.session[data-key="claude:${id}"]`, { timeout: 10_000 });
+    await page.waitForSelector("#dock .outside");
+    assert.match(await page.locator("#dock .outside").innerText(), /No replies from here: the page types into sessions through herdr/);
+    assert.equal(await page.locator("#dock #prompt").count(), 0, "no reply box that could not send");
+    await shot("outside");
+    page.once("dialog", (d) => void d.accept());
+    await page.click('#dock [data-act="move"]');
+    await until(() => herdrCalls().some((l) => l === `agent start ${l.split(" ")[2]} --kind claude --pane w9:p1 --timeout 60000 -- --resume ${id}`));
+    await until(() => elsewhere.signalCode === "SIGTERM");
+    assert.ok(herdrCalls().findIndex((l) => l.startsWith("workspace create")) < herdrCalls().findIndex((l) => l.includes(`--resume ${id}`)));
+  });
+
   it("logged no errors", () => {
     assert.deepEqual(errors, []);
   });

@@ -16,7 +16,8 @@ import { icon } from "./icon.ts";
 import { codexHome } from "./inbox.ts";
 import { EFFORTS, startSession, type StartRequest } from "./start.ts";
 import { repoInfo } from "./git.ts";
-import { focus, herdrAgents, matchPanes, prompt, screen, sendKeys, type HerdrAgent } from "./herdr.ts";
+import { focus, herdrAgents, herdrSockets, matchPanes, prompt, screen, sendKeys, type HerdrAgent } from "./herdr.ts";
+import { moveToHerdr } from "./move.ts";
 import { applyHolds, hold, parseUntil, release, stateDir } from "./holds.ts";
 import { readInbox, transcriptOf, type Inbox, type InboxItem } from "./inbox.ts";
 import { prStatuses } from "./prs.ts";
@@ -453,7 +454,7 @@ export async function serve(opts: ServeOptions): Promise<Served> {
     const log = (action: string, target?: string, detail?: string) => {
       if (device) audit({ device: device.label, action, ...(target && { target }), ...(detail && { detail }) });
     };
-    const acting = req.method === "POST" && /^\/api\/(herdr\/(prompt|keys)|stage|start|upload)$/.test(url.pathname);
+    const acting = req.method === "POST" && /^\/api\/(herdr\/(prompt|keys)|stage|start|upload|move)$/.test(url.pathname);
     if (device && acting && !fresh) return json(res, 403, { error: "Confirm it is you with this device's passkey.", confirm: true });
     if (req.method === "GET" && url.pathname === "/api/inbox") {
       const inbox = currentInbox();
@@ -463,7 +464,9 @@ export async function serve(opts: ServeOptions): Promise<Served> {
       const items = placed.map((i) => (conflicts[i.key] ? { ...i, conflicts: conflicts[i.key] } : i));
       const prStatus = prStatuses(items.filter((i) => i.state !== "stale").flatMap((i) => (i.prs ?? []).map((p) => p.url)));
       const home = opts.root ?? null;
-      return json(res, 200, { ...inbox, items, prStatus, home, homeProject: home ? placeOf(home).project : null });
+      // Whether a session from another terminal can move into herdr, to be answered from here.
+      const herdrRunning = opts.herdr !== false && (herdrSockets().length > 0 || panes.size > 0);
+      return json(res, 200, { ...inbox, items, prStatus, home, homeProject: home ? placeOf(home).project : null, herdrRunning });
     }
     if (req.method === "GET" && url.pathname === "/api/activity") return json(res, 200, { events: readActivity(300) });
     if (url.pathname.startsWith("/api/push")) {
@@ -504,6 +507,26 @@ export async function serve(opts: ServeOptions): Promise<Served> {
       log(kind, item.key);
       return json(res, 200, { hold: hold(item, kind, until) });
     }
+    if (req.method === "POST" && url.pathname === "/api/move") {
+      if (opts.herdr === false) throw new FileError("herdr is off for this page.", 409);
+      const b = await body(req);
+      const item = currentInbox().items.find((i) => i.key === b["key"]);
+      if (!item) return json(res, 404, { error: "That session is no longer listed." });
+      if (panes.has(item.key)) return json(res, 409, { error: "It already runs in herdr." });
+      log("move to herdr", item.key);
+      return json(res, 200, { ok: true, ...(await moveToHerdr(item)) });
+    }
+    /** A send herdr turned down, in words for the page; and in the log of what devices did. */
+    const failed = (what: string, key: unknown, e: Error & { code?: string }): never => {
+      const why =
+        e.code === "agent_blocked"
+          ? "It is asking you something on its screen; answer that first."
+          : e.code === "pane_not_found" || e.code === "agent_not_found" || e.code === "agent_not_running"
+            ? "herdr no longer has it in that pane: it may have closed or moved."
+            : e.message;
+      log(`${what} failed`, String(key), why);
+      throw new FileError(why, 409);
+    };
     if (url.pathname.startsWith("/api/herdr/")) {
       const action = url.pathname.slice("/api/herdr/".length);
       if (req.method === "GET" && action === "screen") {
@@ -521,11 +544,12 @@ export async function serve(opts: ServeOptions): Promise<Served> {
         const text = String(b["text"] ?? "").trim();
         if (!text || text.length > 20_000) throw new Error("Write a prompt (up to 20,000 characters).");
         log("prompt", String(b["key"]), text);
-        return json(res, 200, { ok: true, result: await prompt(pane, text) });
+        const result = await prompt(pane, text).catch((e: Error) => failed("prompt", b["key"], e));
+        return json(res, 200, { ok: true, result });
       }
       if (action === "keys") {
         const keys = Array.isArray(b["keys"]) ? b["keys"].map(String) : [];
-        const result = await sendKeys(pane, keys);
+        const result = await sendKeys(pane, keys).catch((e: Error) => failed("keys", b["key"], e));
         log("keys", String(b["key"]), keys.join(" "));
         return json(res, 200, { ok: true, result });
       }

@@ -245,6 +245,14 @@ When a session runs in a [herdr](https://herdr.dev) pane, the page can act on it
 herdr also sees Codex's approval prompts, which Codex itself does not log. Nothing is sent without
 a click; `--no-herdr` turns all of this off.
 
+**A session in another terminal** (a Ptyxis or GNOME Terminal tab, VS Code, tmux) shows up like
+any other, but the page cannot type into it: there is no reply box, and the page says where it
+runs instead. When it waits for you, **Continue in herdr** moves it: Agent Deck opens a herdr tab
+in its folder first, then closes the session where it ran and opens it again in that tab with
+the same conversation (`claude --resume`, `codex resume`). Claude Code keeps its session id, so
+the page goes on showing the same session, now with a reply box. The old terminal gets a line
+saying where it went. A session at work, or one asking something, is never moved.
+
 ### Starting a session
 
 **New** starts Claude Code or Codex in one of your sessions' folders. It runs in a new herdr tab

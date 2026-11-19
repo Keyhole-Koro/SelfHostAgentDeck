@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { summarize } from "../src/prs.ts";
 import { browser, decrypt, pushService } from "./push-browser.ts";
@@ -278,6 +278,7 @@ echo "$HERDR_SOCKET_PATH $*" >> "${log}"
 case "$1 $2" in
   "agent list") printf '%s\n' '${JSON.stringify({ id: "cli:agent:list", result: { type: "agent_list", agents } })}' ;;
   "agent read") printf '%s\n' '${JSON.stringify({ id: "cli:agent:read", result: { type: "pane_read", read: { text: "Allow this command?\n> 1. Yes\n  2. No" } } })}' ;;
+  "workspace create") printf '%s\n' '{"id":"cli","result":{"type":"workspace_created","root_pane":{"pane_id":"w2:p1"},"tab":{},"workspace":{}}}' ;;
   *) printf '%s\n' '{"id":"cli","result":{"type":"agent_info"}}' ;;
 esac
 `,
@@ -340,6 +341,37 @@ esac
     });
     const calls = readFileSync(log, "utf8").split("\n").filter((l) => !l.includes("agent list") && l);
     assert.deepEqual(calls, [`${socket} agent focus w1:p9`, `${socket} agent prompt w1:p9 Ship it`, `${socket} agent send-keys w1:p4 1 enter`, `${socket} agent read w1:p4 --source visible`]);
+  });
+
+  it("moves a session waiting in another terminal into herdr, to go on with the same conversation", { skip: process.platform !== "linux" && "reads /proc" }, async () => {
+    const { api, log, socket } = await setUp();
+    // Claude Code in a terminal outside herdr (a process named so, with no herdr pane), and one at work.
+    const id = "5e55a0e1-0000-4000-8000-000000000001";
+    const outside = spawn("bash", ["-c", "exec -a claude-standin sleep 30"], { stdio: "ignore" });
+    const busy = spawn("bash", ["-c", "exec -a claude-standin sleep 30"], { stdio: "ignore" });
+    try {
+      running(id, outside.pid!, { status: "idle", name: "Rate-limit the API" });
+      running("5e55a0e1-0000-4000-8000-000000000002", busy.pid!, { status: "busy" });
+      const listed = await eventually(async () => {
+        const by = Object.fromEntries((await api.get("/api/inbox")).items.map((i: { key: string }) => [i.key, i]));
+        return by[`claude:${id}`] && by["claude:sa"]?.herdr ? by : undefined;
+      });
+      assert.equal(listed[`claude:${id}`].herdr, undefined);
+      await assert.rejects(api.post("/api/move", { key: "claude:sa" }), /409 It already runs in herdr/);
+      await assert.rejects(api.post("/api/move", { key: "claude:5e55a0e1-0000-4000-8000-000000000002" }), /409 It can move once it waits for you/);
+      assert.ok(busy.exitCode === null && !busy.signalCode, "a session at work is left alone");
+
+      const r = await api.post("/api/move", { key: `claude:${id}` });
+      assert.equal(r.key, `claude:${id}`, "the same session, resumed");
+      assert.equal(r.pane, "w2:p1");
+      assert.equal(outside.signalCode, "SIGTERM", "closed where it ran");
+      const calls = readFileSync(log, "utf8").split("\n").filter((l) => l.includes("workspace") || l.includes("agent start"));
+      assert.deepEqual(calls.slice(0, 2), [`${socket} workspace list`, `${socket} workspace create --cwd ${repo} --label ${basename(repo)} --no-focus`], "a tab is opened before anything is closed");
+      assert.match(calls[2]!, new RegExp(`^${socket} agent start \\S+ --kind claude --pane w2:p1 --timeout 60000 -- --resume ${id}$`));
+    } finally {
+      outside.kill();
+      busy.kill();
+    }
   });
 
   it("leaves herdr alone with --no-herdr", { skip: process.platform !== "linux" && "reads /proc" }, async () => {
