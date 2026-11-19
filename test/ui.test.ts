@@ -5,6 +5,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
 
+// Run inside herdr or not, the processes these tests start must not inherit a real herdr pane.
+delete process.env["HERDR_PANE_ID"];
+delete process.env["HERDR_SOCKET_PATH"];
+
 /**
  * The page in a real browser (Playwright's Chromium), against a made-up home: sessions waiting in
  * herdr panes, one sharing a file with another, a pull request, a session idle for days, a long
@@ -261,7 +265,9 @@ esac
 
   it("sends a prompt, and a review of its hunks", async () => {
     await page.fill("#prompt", "Open the PR");
-    await page.click('[data-act="prompt"]');
+    await page.press("#prompt", "Enter");
+    assert.ok(!herdrCalls().some((l) => l.includes("Open the PR")), "Enter alone does not send");
+    await page.press("#prompt", "Control+Enter");
     await until(() => herdrCalls().includes("agent prompt w1:p2 Open the PR"));
     assert.equal(await page.locator("#dock [data-quick]").count(), 0, "no one-tap replies until you add some");
     await page.click('#dock [data-act="tune"]');
@@ -365,6 +371,7 @@ esac
     const box = (await phone.locator("#prompt").boundingBox())!;
     assert.ok(box.y > 600 && box.y + box.height <= 844, `the reply box sits at the bottom (${box.y}+${box.height})`);
     assert.ok(box.height >= 20, `and is a line tall, though the page was drawn while it was hidden (${box.height})`);
+    assert.equal(await phone.locator("#prompt").evaluate((t) => getComputedStyle(t).fontSize), "16px", "under 16px, iOS zooms in on a tap");
     assert.equal(await phone.evaluate(() => document.documentElement.scrollWidth), 390, "no sideways scrolling");
     await phone.click('[data-tab="details"]');
     assert.ok(await phone.locator("#pane-details #info").isVisible());
@@ -409,6 +416,8 @@ esac
     const card = page.locator('.card[data-card="claude:chatty"]');
     await card.locator(".card-input").fill("hello from the deck");
     await card.locator(".card-input").press("Enter");
+    assert.equal(await card.locator(".card-input").inputValue(), "hello from the deck\n", "Enter alone is a new line");
+    await card.locator(".card-input").press("Control+Enter");
     await until(() => herdrCalls().includes("agent prompt w1:p3 hello from the deck"));
     assert.equal(await card.locator(".card-input").inputValue(), "", "sent, and cleared");
     await shot("6-deck");

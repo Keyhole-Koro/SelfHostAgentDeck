@@ -41,6 +41,11 @@
 html, body { height: 100%; }
 body { margin: 0; height: 100dvh; display: flex; flex-direction: column; overflow: hidden; background: var(--bg); color: var(--text); font: 15px/1.55 var(--sans); -webkit-text-size-adjust: 100%; }
 button, input, textarea { font: inherit; color: inherit; }
+/* Touch screens: iOS zooms into a text box whose text is under 16px; a double tap on a button must not zoom either. */
+@media (pointer: coarse) {
+  input, textarea, select { font-size: 16px !important; }
+  button, a, summary, .session, .choice, .card { touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
+}
 a { color: var(--accent); }
 code, pre { font-family: var(--mono); }
 
@@ -426,7 +431,7 @@ body:not([data-layout="focus"]) .layout-root { display: block; }
 .card-quick { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; margin-bottom: 6px; }
 .card-quick:empty { display: none; }
 .card-form { display: flex; gap: 6px; }
-.card-input { flex: 1; min-width: 0; font: inherit; font-size: 14px; color: var(--text); background: var(--field); border: 1px solid var(--line); border-radius: 10px; padding: 6px 10px; }
+.card-input { flex: 1; min-width: 0; resize: none; line-height: 1.4; max-height: 30vh; font: inherit; font-size: 14px; color: var(--text); background: var(--field); border: 1px solid var(--line); border-radius: 10px; padding: 6px 10px; }
 .card-input:focus { outline: none; border-color: var(--accent); }
 .card-note { margin: 4px 2px 0; font-size: 12px; color: var(--muted); }
 .card-note:empty { display: none; }
@@ -664,6 +669,11 @@ let notifyOn = stored("notify", false) && typeof Notification !== "undefined" &&
 let tab = TABS.includes(stored("tab", "chat")) ? stored("tab", "chat") : "chat";
 /** One-tap replies above the reply box: none until you add some (a tap sends at once). */
 let quick = stored("quick", []);
+/** Ctrl+Enter sends (⌘+Enter on a Mac); Enter alone is a new line, and confirms a conversion while typing Japanese. */
+const SEND_KEYS = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent) ? "⌘+Enter" : "Ctrl+Enter";
+const fine = matchMedia("(pointer: fine)");
+const replyHint = (i) => `${i.state === "working" ? "Queue a message" : "Reply"}${fine.matches ? ` (${SEND_KEYS} sends)` : ""}`;
+const sendKeyPressed = (ev) => ev.key === "Enter" && (ev.ctrlKey || ev.metaKey) && !ev.isComposing && ev.keyCode !== 229;
 let keysOpen = false; // the keypad and the screen, under a question with choices
 let tuneOpen = false; // the model, effort and one-tap replies, above the reply box
 
@@ -1244,7 +1254,7 @@ function paintDock(e) {
     const stop = i.state === "working" ? `<button class="icon-btn" data-key-press="esc" title="Stop it (Esc)" aria-label="Stop">${icon("stop")}</button>` : "";
     const files = attached.get(i.key) || [];
     if (files.length) html += `<div class="attached">${files.map((f, n) => `<span class="att" title="${esc(f.path)}"><span class="nm">${esc(f.name)}</span><button data-unattach="${n}" aria-label="Do not send ${esc(f.name)}">×</button></span>`).join("")}</div>`;
-    html += `<div class="composer"><button class="icon-btn" data-act="attach" title="Send files: photos, logs, documents" aria-label="Send files">${icon("plus", 20)}</button><input type="file" id="attach" multiple hidden>${tune}<textarea id="prompt" rows="1" aria-label="Message to the session" placeholder="${i.state === "working" ? "Queue a message" : "Reply"}" title="Ctrl+Enter sends">${esc(drafts.get(i.key) || "")}</textarea>${stop}<button class="send-btn" data-act="prompt" title="Send (Ctrl+Enter)" aria-label="Send">${icon("send")}</button></div>`;
+    html += `<div class="composer"><button class="icon-btn" data-act="attach" title="Send files: photos, logs, documents" aria-label="Send files">${icon("plus", 20)}</button><input type="file" id="attach" multiple hidden>${tune}<textarea id="prompt" rows="1" aria-label="Message to the session" placeholder="${replyHint(i)}" title="${SEND_KEYS} sends">${esc(drafts.get(i.key) || "")}</textarea>${stop}<button class="send-btn" data-act="prompt" title="Send (${SEND_KEYS})" aria-label="Send">${icon("send")}</button></div>`;
     if (i.state === "working") html += `<p class="sub hint">It is working; your message waits in its queue.</p>`;
   } else if (i && !i.herdr && i.state !== "stale") {
     html += outsideHtml(i);
@@ -1615,7 +1625,7 @@ async function paintNew() {
     <div class="two"><label>Model<input id="ns-model" list="ns-models" placeholder="its default" value="${esc(last.model || "")}" autocomplete="off"></label><label>Effort<select id="ns-effort"><option value="">its default</option>${p.efforts.map((x) => `<option${x === last.effort ? " selected" : ""}>${x}</option>`).join("")}</select></label></div>
     <datalist id="ns-models"></datalist>
     <div class="check"><label><input type="checkbox" id="ns-wt"> In a new worktree, on a branch</label><input id="ns-branch" placeholder="branch, e.g. agent/export" aria-label="Branch name" autocomplete="off"></div>
-    <label>First message<textarea id="ns-prompt" placeholder="What should it do?"></textarea></label>
+    <label>First message<textarea id="ns-prompt" placeholder="What should it do?${fine.matches ? ` (${SEND_KEYS} starts it)` : ""}"></textarea></label>
     <div class="attached" id="ns-files"></div>
     <div class="actions"><button class="btn icon" data-act="ns-attach" title="Send files with it" aria-label="Send files">+</button><input type="file" id="ns-attach" multiple hidden><button class="btn primary" data-act="ns-start"${p.herdr && p.projects.length ? "" : " disabled"}>Start</button><span class="note" id="ns-note"></span></div>
   </div>`;
@@ -1935,7 +1945,7 @@ function cards(container, items, size = "tile") {
     if (!el) {
       el = doc.createElement("article");
       el.dataset.card = i.key;
-      el.innerHTML = `<header class="card-head"></header><div class="card-meta"></div><div class="card-body"></div><div class="card-ask"></div><p class="card-note"></p><div class="card-reply"><div class="card-quick"></div><form class="card-form" data-card-form><input class="card-input" aria-label="Reply to ${esc(nameOf(i))}" placeholder="${i.state === "working" ? "Queue a message" : "Reply"}" autocomplete="off"><button class="send-btn small" aria-label="Send">${icon("send", 16)}</button></form><p class="card-outside"></p></div>`;
+      el.innerHTML = `<header class="card-head"></header><div class="card-meta"></div><div class="card-body"></div><div class="card-ask"></div><p class="card-note"></p><div class="card-reply"><div class="card-quick"></div><form class="card-form" data-card-form><textarea class="card-input" rows="1" aria-label="Reply to ${esc(nameOf(i))}" placeholder="${replyHint(i)}"></textarea><button class="send-btn small" aria-label="Send">${icon("send", 16)}</button></form><p class="card-outside"></p></div>`;
     }
     if (el !== before) container.insertBefore(el, before);
     before = el.nextElementSibling;
@@ -2063,6 +2073,19 @@ function cardSubmit(ev) {
 }
 $("layout-root").addEventListener("click", cardClick);
 $("layout-root").addEventListener("submit", cardSubmit);
+/** In a card's reply box: Ctrl+Enter sends, Enter alone is a new line. */
+function cardKey(ev) {
+  if (!ev.target.classList || !ev.target.classList.contains("card-input") || !sendKeyPressed(ev)) return;
+  ev.preventDefault();
+  ev.target.form.requestSubmit();
+}
+$("layout-root").addEventListener("keydown", cardKey);
+$("layout-root").addEventListener("input", (ev) => {
+  const t = ev.target;
+  if (!t.classList || !t.classList.contains("card-input")) return;
+  t.style.height = "auto";
+  t.style.height = t.scrollHeight + 2 + "px";
+});
 $("layouts").addEventListener("click", (ev) => {
   const b = ev.target.closest("[data-layout]");
   if (b) return setLayout(b.dataset.layout);
@@ -2085,6 +2108,7 @@ async function popOut() {
   pip.document.body.innerHTML = `<div id="pip-root"><header class="pip-head"><b>Agent Deck</b><span class="sub" id="pip-summary"></span></header><div class="layout-empty" id="pip-empty">Nothing waits on you.</div><div class="mini-list"></div></div>`;
   pip.document.addEventListener("click", cardClick);
   pip.document.addEventListener("submit", cardSubmit);
+  pip.document.addEventListener("keydown", cardKey);
   pip.addEventListener("pagehide", () => {
     pip = null;
     shown.layouts = "";
@@ -2534,7 +2558,9 @@ $("chat").addEventListener("scroll", () => {
 
 $("app").addEventListener("keydown", (ev) => {
   if (ev.target.id === "custom" && ev.key === "Enter") setRange(rangeFromInput(ev.target.value));
-  if (ev.target.id === "prompt" && ev.key === "Enter" && (ev.ctrlKey || ev.metaKey)) act("prompt");
+  if (!sendKeyPressed(ev)) return;
+  if (ev.target.id === "prompt") ev.preventDefault(), act("prompt");
+  if (ev.target.id === "ns-prompt") ev.preventDefault(), act("ns-start");
 });
 $("app").addEventListener("change", (ev) => {
   const i = entry(selected) && entry(selected).item;
