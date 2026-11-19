@@ -351,7 +351,8 @@ export async function serve(opts: ServeOptions): Promise<Served> {
     if (req.method === "GET" && url.pathname === "/api/chat") {
       const item = listed(url.searchParams.get("key"));
       const file = transcriptOf(item);
-      if (!file) return json(res, 404, { error: "Its transcript was not found." });
+      // A session that has not said anything yet has no transcript yet.
+      if (!file) return json(res, 200, { messages: [], end: 0 });
       return json(res, 200, readChat(file, item.agent, { before: offset(url, "before"), after: offset(url, "after"), ...(item.cwd && { cwd: item.cwd }) }));
     }
     if (req.method === "GET" && (url.pathname === "/api/files" || url.pathname === "/api/files/image")) {
