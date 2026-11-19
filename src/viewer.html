@@ -82,6 +82,8 @@ header#top h1 { margin: 0; font-size: 16px; font-weight: 650; letter-spacing: -.
 .send-btn { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 34px; height: 34px; padding: 0; border: 0; border-radius: 50%; background: var(--accent); color: var(--on-accent); cursor: pointer; }
 .send-btn:hover { filter: brightness(1.08); }
 .send-btn.small { width: 30px; height: 30px; }
+.send-btn.done { background: var(--ok); color: var(--bg); transition: background .2s; }
+.choice.picked { border-color: var(--accent); background: var(--hover); }
 
 /* ---------------------------------------------------------------- columns */
 .app { flex: 1; min-height: 0; display: grid; grid-template-columns: 300px minmax(0, 1fr) 340px; }
@@ -530,6 +532,9 @@ body.pip { height: auto; min-height: 100vh; overflow: auto; display: block; }
   <p class="note error" id="confirm-error"></p>
 </dialog>
 <script>
+// iOS zooms into a text box on focus; telling it not to scale stops that, and on iOS pinching
+// still zooms. Elsewhere the setting would take pinching away, so iOS only.
+if (/iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1)) document.querySelector('meta[name="viewport"]').content += ", maximum-scale=1";
 /*@markdown*/
 /*@passkey*/
 
@@ -2036,7 +2041,8 @@ async function cardAct(key, card, run) {
   const note = card.querySelector(".card-note");
   try {
     await run();
-    if (note) ((note.textContent = "Sent."), (note.className = "card-note ok"));
+    if (note) ((note.textContent = ""), (note.className = "card-note"));
+    flash(card.querySelector(".send-btn"));
     setTimeout(() => {
       const st = cardState.get(key);
       if (st) st.screenSince = null; // read what it asks next
@@ -2371,9 +2377,18 @@ async function uploadFiles(i, list) {
 
 async function sendPrompt(i, text) {
   await post("/api/herdr/prompt", { key: i.key, text });
-  const n = $("answer-note");
-  if (n) ((n.textContent = "Sent."), (n.className = "note ok"));
+  setNote("answer-note", "", true);
+  flash(document.querySelector('#dock [data-act="prompt"]'));
   setTimeout(() => void loadChat("newer"), 1500);
+}
+
+/** A button says it worked by turning into a check for a moment, instead of a line of text. */
+function flash(btn) {
+  if (!btn) return;
+  const was = btn.innerHTML;
+  btn.classList.add("done");
+  btn.innerHTML = icon("check", btn.classList.contains("small") ? 16 : 20);
+  setTimeout(() => btn.isConnected && (btn.classList.remove("done"), (btn.innerHTML = was)), 1200);
 }
 
 /** Picks a choice of the dialog on its screen (the server moves to it, checks, then presses Enter). */
@@ -2382,11 +2397,12 @@ async function chooseOne(el) {
   if (!i) return;
   const label = el.dataset.label;
   for (const b of document.querySelectorAll("#dock [data-choose]")) b.disabled = true;
-  setNote("answer-note", `Choosing “${label}”…`, true);
+  el.classList.add("picked");
+  setNote("answer-note", "", true);
   try {
     await post("/api/herdr/choose", { key: i.key, index: Number(el.dataset.choose), label });
-    setNote("answer-note", `Chose “${label}”.`, true);
   } catch (e) {
+    el.classList.remove("picked");
     setNote("answer-note", e.message, false);
     for (const b of document.querySelectorAll("#dock [data-choose]")) b.disabled = false;
   }
@@ -2397,8 +2413,7 @@ async function pressKey(k) {
   const i = entry(selected) && entry(selected).item;
   try {
     await post("/api/herdr/keys", { key: i.key, keys: [k] });
-    $("answer-note").textContent = `Sent ${k}.`;
-    $("answer-note").className = "note ok";
+    setNote("answer-note", "", true);
     setTimeout(() => $("screen") && act("screen"), 700); // show what it did, and what it asks next
   } catch (e) {
     $("answer-note").textContent = e.message;
