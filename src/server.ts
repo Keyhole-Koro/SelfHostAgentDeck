@@ -1,7 +1,8 @@
 import { randomBytes } from "node:crypto";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { Worker } from "node:worker_threads";
+import { homedir } from "node:os";
 import { basename, join } from "node:path";
 import { renderSVG } from "uqr";
 import { appendActivity, changes, readActivity, snapshot, type ActivityEvent, type Snapshot } from "./activity.ts";
@@ -208,6 +209,32 @@ export function attributionWorker(idleMs = WORKER_IDLE_MS): ((req: Ask) => Promi
   return Object.assign(ask, { running: () => worker !== undefined });
 }
 
+/**
+ * Your own layouts: each .js file in ~/.config/agent-deck/layouts/ goes into the page's script
+ * (so the page's Content-Security-Policy lets it run), where it calls AgentDeck.registerLayout.
+ * Your code, on your page: it can do what the page can.
+ */
+export function layoutsDir(): string {
+  return env("LAYOUTS_DIR") || join(process.env["XDG_CONFIG_HOME"] || join(homedir(), ".config"), "agent-deck", "layouts");
+}
+
+function userLayouts(): string {
+  let files: string[];
+  try {
+    files = readdirSync(layoutsDir())
+      .filter((f) => f.endsWith(".js"))
+      .sort();
+  } catch {
+    return "";
+  }
+  return files
+    .map((f) => {
+      const code = readFileSync(join(layoutsDir(), f), "utf8").replace(/<\/script/gi, "<\\/script");
+      return `\n// ${f.replace(/[^\w.-]/g, "_")}\ntry {\n${code}\n} catch (e) {\n  console.error("Layout ${f.replace(/[^\w.-]/g, "_")} failed:", e);\n}\n`;
+    })
+    .join("");
+}
+
 /** Codex's configured model, to suggest. */
 function codexModels(): string[] {
   try {
@@ -250,7 +277,8 @@ function viewerPage(nonce: string, mode: "local" | "remote"): string {
     .replace("<head>", `<head>\n<meta name="agent-deck-mode" content="${mode}">`)
     .replace("<script>", `<script nonce="${nonce}">`)
     .replace("/*@markdown*/", () => readFileSync(MARKDOWN, "utf8"))
-    .replace("/*@passkey*/", () => PASSKEY_HELPERS);
+    .replace("/*@passkey*/", () => PASSKEY_HELPERS)
+    .replace("/*@layouts*/", () => userLayouts());
 }
 
 /** A request's bytes, up to `max`. */
@@ -508,7 +536,8 @@ export async function serve(opts: ServeOptions): Promise<Served> {
       const file = transcriptOf(item);
       // A session that has not said anything yet has no transcript yet.
       if (!file) return json(res, 200, { messages: [], end: 0 });
-      return json(res, 200, readChat(file, item.agent, { before: offset(url, "before"), after: offset(url, "after"), ...(item.cwd && { cwd: item.cwd }) }));
+      const limit = offset(url, "limit");
+      return json(res, 200, readChat(file, item.agent, { before: offset(url, "before"), after: offset(url, "after"), ...(limit && { limit: Math.min(limit, 100) }), ...(item.cwd && { cwd: item.cwd }) }));
     }
     if (req.method === "GET" && (url.pathname === "/api/files" || url.pathname === "/api/files/image")) {
       const item = listed(url.searchParams.get("key"));
