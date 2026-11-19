@@ -1,6 +1,6 @@
 import { closeSync, constants, openSync, readFileSync, readlinkSync, writeSync } from "node:fs";
 import { FileError } from "./files.ts";
-import type { InboxItem } from "./inbox.ts";
+import { commandOf, type InboxItem } from "./inbox.ts";
 import { closePane, openPane, startIn, type StartRequest, type Started } from "./start.ts";
 
 /**
@@ -27,15 +27,6 @@ function ended(pid: number): boolean {
     } catch (e) {
       return (e as NodeJS.ErrnoException).code === "ESRCH";
     }
-  }
-}
-
-/** The command line of a process, as one string. */
-function commandOf(pid: number): string {
-  try {
-    return readFileSync(`/proc/${pid}/cmdline`, "utf8").split("\0").join(" ");
-  } catch {
-    return "";
   }
 }
 
@@ -73,7 +64,9 @@ export async function moveToHerdr(item: InboxItem, wait = 8000): Promise<Started
   if (!pid || !item.cwd) throw new FileError("Agent Deck cannot tell which process runs it.", 409);
   if (item.terminal) throw new FileError("It already runs in herdr.", 409);
   if (item.state !== "your-turn") throw new FileError("It can move once it waits for you: now it is working, or asks something.", 409);
-  if (!commandOf(pid).includes(item.agent)) throw new FileError("Its process is gone, or is something else now.", 409);
+  const command = commandOf(pid);
+  if (!command.includes(item.agent)) throw new FileError("Its process is gone, or is something else now.", 409);
+  if (/\bapp-server\b/.test(command)) throw new FileError("It runs in Codex's background server, which other sessions share: it cannot be moved from here.", 409);
   const req: StartRequest = { dir: item.cwd, agent: item.agent, prompt: "", resume: item.id, label: item.title || item.name };
   const at = await openPane(req).catch((e: Error) => {
     throw new FileError(`herdr could not open a tab for it, so it stays where it is: ${e.message}`, 409);

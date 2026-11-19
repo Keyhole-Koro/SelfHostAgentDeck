@@ -381,6 +381,15 @@ export function terminalApp(pid: number): string | undefined {
   return app;
 }
 
+/** The command line of a process, as one string (Linux only). */
+export function commandOf(pid: number): string {
+  try {
+    return readFileSync(`/proc/${pid}/cmdline`, "utf8").split("\0").join(" ").trim();
+  } catch {
+    return "";
+  }
+}
+
 /** Where a running session's process is: its herdr pane, or else the terminal app it runs in. */
 function placeProcess(item: InboxItem, pid: number): void {
   const memory = memoryOf(pid);
@@ -1107,6 +1116,11 @@ function codexItems(home: string, now: number): { items: InboxItem[]; limits?: C
       }
     })
     .map((f) => f.slice(0, -".lock".length));
+  // Codex's background server (`codex app-server`) holds the threads of the windows that use it, and
+  // of the terminals too in newer versions: a process holding several, or that server, is no one
+  // session's own, and must never be taken for one (to close, say).
+  const holders = [...pids.values()];
+  for (const [id, pid] of pids) if (holders.indexOf(pid) !== holders.lastIndexOf(pid) || /\bapp-server\b/.test(commandOf(pid))) pids.delete(id);
   findRollouts(join(home, "sessions"), ids);
   const names = threadNames(home);
   const items: InboxItem[] = [];

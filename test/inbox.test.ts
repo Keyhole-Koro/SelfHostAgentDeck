@@ -332,6 +332,25 @@ describe("inbox: Codex", () => {
     assert.equal(item?.runsIn, undefined, "in herdr, the terminal app does not matter");
   });
 
+  it("takes no process for threads held by Codex's background server, or by one process for several", { skip: process.platform !== "linux" || !existsSync("/usr/bin/flock") }, async () => {
+    const [a, b, c] = ["01a1e377-0000-7000-8000-000000000006", "01a1e377-0000-7000-8000-000000000007", "01a1e377-0000-7000-8000-000000000008"];
+    for (const id of [a, b, c]) thread(id, [ev({ type: "task_complete", last_agent_message: "Done." })], { hold: false });
+    const lock = (id: string) => join(codex, "thread-writer-locks", `${id}.lock`);
+    // One process holding two threads, as `codex app-server` does for the windows and terminals using it.
+    const both = spawn("python3", ["-I", "-c", "import fcntl,sys,time\nfs=[open(p,'a') for p in sys.argv[1:]]\nfor f in fs: fcntl.flock(f, fcntl.LOCK_EX)\nprint('held', flush=True)\ntime.sleep(60)", lock(a), lock(b)], { stdio: ["ignore", "pipe", "ignore"], detached: true });
+    holders.push(both);
+    await new Promise((r) => both.stdout!.once("data", r));
+    // And the server holding just one.
+    holders.push(spawn("flock", [lock(c), "sleep", "60"], { stdio: "ignore", detached: true, argv0: "codex app-server" }));
+    await settle();
+    const by = byKey(inbox().items);
+    for (const id of [a, b, c]) {
+      assert.ok(by[`codex:${id}`], "still listed");
+      assert.equal(by[`codex:${id}`]!.pid, undefined, `${id}: not its own process`);
+      assert.equal(by[`codex:${id}`]!.memory, undefined);
+    }
+  });
+
   it("reads the command out of exec's JavaScript and out of JSON arguments", () => {
     assert.equal(codexCommand("exec", 'tools.exec_command({cmd:"git status",workdir:"/w"})'), "git status");
     assert.equal(codexCommand("shell", JSON.stringify({ command: ["bash", "-lc", "npm test"] })), "bash -lc npm test");
