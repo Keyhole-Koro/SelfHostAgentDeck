@@ -7,8 +7,9 @@ import { after, before, describe, it } from "node:test";
 
 /**
  * The page in a real browser (Playwright's Chromium), against a made-up home: sessions waiting in
- * herdr panes, one sharing a file with another, a pull request, a session idle for days. herdr and
- * gh are fakes that log what they were asked. Skipped when Chromium cannot start (no browsers).
+ * herdr panes, one sharing a file with another, a pull request, a session idle for days, a long
+ * conversation. herdr and gh are fakes that log what they were asked. Then the same page at a
+ * phone's and a tablet's size, and in the dark. Skipped when Chromium cannot start (no browsers).
  */
 
 const CLI = join(import.meta.dirname, "..", "src", "cli.ts");
@@ -33,6 +34,15 @@ describe("page", { skip: (!chromium && "no browser") || (process.platform !== "l
   let browser: import("playwright").Browser;
   let page: import("playwright").Page;
   const errors: string[] = [];
+  /** Another page on the same server: a phone, a tablet, the dark. */
+  const another = async (opts: import("playwright").BrowserContextOptions) => {
+    const p = await browser.newPage(opts);
+    p.on("pageerror", (e) => errors.push(e.message));
+    p.on("console", (m) => m.type() === "error" && errors.push(m.text()));
+    await p.goto(url);
+    await p.waitForSelector(".session");
+    return p;
+  };
 
   const git = (...args: string[]) => execFileSync("git", args, { cwd: repo, env: { ...process.env, GIT_AUTHOR_DATE: PAST, GIT_COMMITTER_DATE: PAST, GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" } });
   /** A process standing in for a session's own, in a herdr pane when `pane` is given. */
@@ -100,6 +110,15 @@ describe("page", { skip: (!chromium && "no browser") || (process.platform !== "l
     transcript("fixer", [{ type: "ai-title", aiTitle: "Fix z" }, tool("e2", "Edit", { file_path: join(repo, "shared.ts"), old_string: "const z = 26;", new_string: "const z = 26;\nconst fixed = true;" })]);
     running("fixer", proc(), { status: "busy" });
 
+    writeFileSync(join(repo, "notes.md"), "# Release notes\n\n- due dates\n");
+    writeFileSync(join(repo, ".env"), "TOKEN=secret");
+    const chatty: object[] = [{ type: "ai-title", aiTitle: "Long talk" }];
+    for (let n = 0; n < 45; n++) chatty.push({ type: "user", message: { content: `question ${n}` } }, { type: "assistant", message: { content: [{ type: "text", text: `answer ${n}` }] } });
+    chatty.push(tool("t1", "Bash", { command: "npm test" }), { type: "user", message: { content: [{ type: "tool_result", tool_use_id: "t1", content: "1 failing", is_error: true }] } });
+    chatty.push({ type: "assistant", message: { content: [{ type: "text", text: 'See `notes.md` for **details**.\n\n<img src=x onerror="window.__xss=1">' }] } });
+    transcript("chatty", chatty);
+    running("chatty", proc("w1:p3"), { status: "idle", statusUpdatedAt: Date.now() - 60_000 });
+
     transcript("old", [{ type: "ai-title", aiTitle: "Old idea" }]);
     running("old", proc(), { status: "idle", statusUpdatedAt: Date.now() - 5 * 864e5 });
 
@@ -107,6 +126,7 @@ describe("page", { skip: (!chromium && "no browser") || (process.platform !== "l
     const agents = [
       { pane_id: "w1:p1", agent_status: "blocked", agent: "claude", terminal_id: "t1", workspace_id: "w1", tab_id: "w1:t1", focused: false, revision: 1 },
       { pane_id: "w1:p2", agent_status: "idle", agent: "claude", terminal_id: "t2", workspace_id: "w1", tab_id: "w1:t1", focused: false, revision: 1 },
+      { pane_id: "w1:p3", agent_status: "idle", agent: "claude", terminal_id: "t3", workspace_id: "w1", tab_id: "w1:t1", focused: false, revision: 1 },
     ];
     writeFileSync(
       herdr,
@@ -147,7 +167,7 @@ esac
   it("groups the sessions under their project and opens on the one that needs an answer", async () => {
     await page.waitForSelector('.session[data-key="claude:asker"][aria-current="true"]');
     assert.match(await page.locator(".project").first().innerText(), new RegExp(repo.split("/").pop()!));
-    assert.match(await page.locator("#detail").innerText(), /Which default sort\?[\s\S]*1\. Relevance/);
+    assert.match(await page.locator("#dock").innerText(), /Which default sort\?[\s\S]*1\. Relevance/);
     assert.match(await page.locator("#summary").innerText(), /1 needs an answer/);
   });
 
@@ -162,13 +182,15 @@ esac
 
   it("shows what a finished session did: recap, prompt, tasks, PR, shared file", async () => {
     await page.click('.session[data-key="claude:builder"]');
-    await page.waitForSelector("text=While you were away");
-    const detail = await page.locator("main").innerText();
-    assert.match(detail, /You asked for due dates; I added them\./);
+    await page.waitForSelector("#chat .recap");
+    const said = await page.locator("#chat").innerText();
+    assert.match(said, /Add due dates[\s\S]*Shall I open the PR\?[\s\S]*You asked for due dates; I added them\./);
+    assert.equal(await page.locator("#chat .msg.me .bubble").first().innerText(), "Add due dates");
     // Labels are uppercased by CSS, and innerText returns what is shown.
-    assert.match(detail, /You asked\s+Add due dates/i);
-    assert.match(detail, /Tasks 1\/2/i);
-    assert.match(detail, /Shared files[\s\S]*shared\.ts with Fix z/);
+    const info = await page.locator("#info").innerText();
+    assert.match(info, /Tasks\s+1\/2/i);
+    assert.match(info, /Shared files[\s\S]*shared\.ts with Fix z/i);
+    assert.ok(await page.locator("aside#side #info").isVisible(), "beside the conversation on a wide screen");
     await until(async () => /CI: 1 failed/.test(await page.locator("#info").innerText()));
     await shot("2-your-turn");
     assert.ok(await page.locator('.session[data-key="claude:builder"] .chip.conflict').count());
@@ -178,6 +200,7 @@ esac
     await page.fill("#prompt", "Open the PR");
     await page.click('[data-act="prompt"]');
     await until(() => herdrCalls().includes("agent prompt w1:p2 Open the PR"));
+    await page.click('[data-tab="changes"]');
     await page.waitForSelector(".comment-btn");
     await page.locator(".comment-btn").first().click();
     await page.locator("[data-editor]:not([hidden]) textarea").fill("Name it dueAt");
@@ -188,6 +211,7 @@ esac
     assert.match(await page.locator(".review").innerText(), /1 comment/);
     await page.click('[data-act="send-review"]');
     await until(() => herdrCalls().some((l) => l.startsWith("agent prompt w1:p2 Review comments on your uncommitted changes:") || l.includes("Name it dueAt")));
+    await page.click('[data-tab="chat"]');
   });
 
   it("puts a session off with Later", async () => {
@@ -199,10 +223,82 @@ esac
   it("lists what can be cleaned up", async () => {
     await page.click("#cleanup");
     await page.waitForSelector('[data-goto="claude:old"]');
-    assert.match(await page.locator("#detail").innerText(), /Idle sessions · 1[\s\S]*Old idea/i);
+    assert.match(await page.locator("#special").innerText(), /Idle sessions · 1[\s\S]*Old idea/i);
     await shot("4-cleanup");
     await page.click("#cleanup");
     await page.waitForSelector(".session[aria-current=\"true\"]");
+  });
+
+  it("shows a long conversation a page at a time, its steps folded, its HTML as text", async () => {
+    await page.click('.session[data-key="claude:chatty"]');
+    await page.waitForSelector("#chat .steps");
+    const text = () => page.locator("#chat").innerText();
+    assert.match(await text(), /question 44[\s\S]*answer 44[\s\S]*1 step[\s\S]*Bash[\s\S]*1 failed[\s\S]*See notes\.md for details\./);
+    assert.doesNotMatch(await text(), /question 0\b/, "only the latest page at first");
+    assert.match(await page.locator("#chat .msg.ai").last().innerHTML(), /<strong>details<\/strong>[\s\S]*&lt;img src=x/);
+    assert.equal(await page.locator("#chat img").count(), 0);
+    assert.equal(await page.evaluate(() => (window as unknown as { __xss?: number }).__xss), undefined);
+    for (let n = 0; n < 6 && !(await page.locator("#chat .start").count()); n++) {
+      await page.locator('[data-act="earlier"]').click().catch(() => {});
+      await page.waitForTimeout(300);
+    }
+    await page.waitForSelector("#chat .start");
+    assert.match(await text(), /question 0\b[\s\S]*question 44/);
+    assert.equal((await text()).match(/question 7\b/g)?.length, 1, "no page twice");
+  });
+
+  it("opens a file the conversation names, and keeps secrets out of the listing", async () => {
+    await page.locator('#chat a.file[data-file="notes.md"]').last().click();
+    await page.waitForSelector("#files .doc h1");
+    assert.equal(await page.locator("#files .doc h1").innerText(), "Release notes");
+    assert.ok(await page.locator('[data-tab="files"][aria-selected="true"]').count());
+    await page.locator("#files .crumbs button").first().click();
+    await page.waitForSelector("#files .dir");
+    const names = await page.locator("#files .entry .nm").allInnerTexts();
+    assert.ok(names.includes("notes.md") && names.includes("shared.ts"), names.join(" "));
+    assert.ok(!names.includes(".env") && !names.includes(".git/"), names.join(" "));
+    await page.click('[data-tab="chat"]');
+  });
+
+  it("fits a phone: the list, then one session with its reply box, and Back", async () => {
+    const phone = await another({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+    assert.equal(await phone.evaluate(() => document.body.dataset.view), "list");
+    assert.equal(await phone.locator("main").isVisible(), false);
+    await phone.click('.session[data-key="claude:chatty"]');
+    await phone.waitForSelector("#prompt");
+    assert.equal(await phone.locator("#nav").isVisible(), false);
+    const box = (await phone.locator("#prompt").boundingBox())!;
+    assert.ok(box.y > 600 && box.y + box.height <= 844, `the reply box sits at the bottom (${box.y}+${box.height})`);
+    assert.equal(await phone.evaluate(() => document.documentElement.scrollWidth), 390, "no sideways scrolling");
+    await phone.click('[data-tab="details"]');
+    assert.ok(await phone.locator("#pane-details #info").isVisible());
+    await shot("5-phone");
+    await phone.locator("#head .back").click();
+    await phone.waitForSelector("#nav .session");
+    assert.equal(await phone.evaluate(() => document.body.dataset.view), "list");
+    await phone.close();
+  });
+
+  it("fits a tablet: two columns, the details in their own tab", async () => {
+    const tablet = await another({ viewport: { width: 820, height: 1180 }, hasTouch: true });
+    await tablet.click('.session[data-key="claude:chatty"]');
+    assert.ok(await tablet.locator("#nav").isVisible());
+    assert.equal(await tablet.locator("aside#side").isVisible(), false);
+    await tablet.click('[data-tab="details"]');
+    assert.match(await tablet.locator("#pane-details").innerText(), /claude --resume chatty/);
+    assert.equal(await tablet.evaluate(() => document.documentElement.scrollWidth), 820);
+    await tablet.close();
+  });
+
+  it("puts no text on white in the dark", async () => {
+    const dark = await another({ viewport: { width: 1400, height: 1000 }, colorScheme: "dark" });
+    await dark.click('.session[data-key="claude:chatty"]');
+    await dark.waitForSelector("#chat .msg.me");
+    const backgrounds = await dark.evaluate(() =>
+      ["body", "#chat .bubble", "#chat .md", "#info .sec", ".composer", "#nav", "#head"].map((sel) => [sel, getComputedStyle(document.querySelector(sel)!).backgroundColor]),
+    );
+    for (const [sel, bg] of backgrounds) assert.ok(!/rgb\(25[0-5], 25[0-5], 25[0-5]\)/.test(bg!), `${sel} is ${bg}`);
+    await dark.close();
   });
 
   it("logged no errors", () => {

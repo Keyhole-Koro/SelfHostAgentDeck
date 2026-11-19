@@ -2,151 +2,286 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+<meta name="theme-color" content="#faf9f6" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#1b1a18" media="(prefers-color-scheme: dark)">
 <title>Agent Diff</title>
 <style>
 :root {
-  --bg: #fbfaf8; --panel: #ffffff; --text: #1f1d1a; --muted: #6f6a62; --line: #e6e2db;
-  --accent: #3b5bdb; --accent-soft: #edf1ff; --selected: #f1efe9;
-  --add-bg: #e9f6ec; --add-text: #1d5c2e; --del-bg: #fbecec; --del-text: #8a2424;
+  --bg: #faf9f6; --side: #f3f1ec; --field: #ffffff; --text: #1f1d1a; --muted: #6b665e; --faint: #9a948a; --line: #e4e0d8;
+  --hover: #ebe8e1; --selected: #e5e1d8; --bubble: #ebe7df; --code-bg: #efece5;
+  --accent: #3b5bdb; --accent-soft: #e7ebfb; --on-accent: #ffffff;
+  --add-bg: #e4f3e7; --add-text: #1d5c2e; --del-bg: #fbe9e9; --del-text: #8a2424;
   --hunk: #6f6a62; --claude: #b45a2c; --codex: #2d6a8f;
   --recorded: #1d5c2e; --sure: #2d6a8f; --likely: #8a6a12; --maybe: #8a2424;
-  --urgent: #b42318; --urgent-soft: #fdeceb; --warn: #8a6a12; --warn-soft: #fbf3dc; --ok: #1d5c2e;
-  --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --urgent: #b42318; --urgent-soft: #fbe8e6; --warn: #8a6a12; --warn-soft: #f7efd6; --ok: #1d5c2e;
+  --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+  --sans: system-ui, -apple-system, "Segoe UI", "Hiragino Sans", "Noto Sans JP", "Noto Sans CJK JP", sans-serif;
+  --col: 860px;
   color-scheme: light;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --bg: #1a1918; --panel: #222120; --text: #ebe8e3; --muted: #9c968c; --line: #35332f;
-    --accent: #8ea6ff; --accent-soft: #283152; --selected: #2c2a27;
-    --add-bg: #1d3324; --add-text: #9fdcae; --del-bg: #3a2222; --del-text: #f0a5a5;
+    --bg: #1b1a18; --side: #201f1d; --field: #252421; --text: #ece9e4; --muted: #a29c92; --faint: #79746b; --line: #34322e;
+    --hover: #292826; --selected: #302e2b; --bubble: #2d2b28; --code-bg: #262422;
+    --accent: #8ea6ff; --accent-soft: #252e50; --on-accent: #10131f;
+    --add-bg: #1c3123; --add-text: #9fdcae; --del-bg: #382121; --del-text: #f0a5a5;
     --hunk: #9c968c; --claude: #e39a72; --codex: #7fb8dc;
     --recorded: #9fdcae; --sure: #7fb8dc; --likely: #e3c56f; --maybe: #f0a5a5;
-    --urgent: #ff9b8f; --urgent-soft: #3d2220; --warn: #e3c56f; --warn-soft: #3a3220; --ok: #9fdcae;
+    --urgent: #ff9b8f; --urgent-soft: #3a2220; --warn: #e3c56f; --warn-soft: #362f1e; --ok: #9fdcae;
     color-scheme: dark;
   }
 }
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
-body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+html, body { height: 100%; }
+body { margin: 0; height: 100dvh; display: flex; flex-direction: column; overflow: hidden; background: var(--bg); color: var(--text); font: 15px/1.55 var(--sans); -webkit-text-size-adjust: 100%; }
 button, input, textarea { font: inherit; color: inherit; }
-header { position: sticky; top: 0; z-index: 2; min-height: 49px; background: var(--bg); border-bottom: 1px solid var(--line); padding: 6px 20px; display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: center; }
-header h1 { margin: 0; font-size: 16px; font-weight: 600; white-space: nowrap; }
-.summary { color: var(--muted); font-size: 13px; display: flex; flex-wrap: wrap; gap: 4px 12px; }
-.summary b { color: var(--text); font-weight: 600; }
-.summary .urgent b { color: var(--urgent); }
-.tools { margin-left: auto; display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; font-size: 12px; color: var(--muted); }
-.limits.high { color: var(--warn); font-weight: 600; }
-.tbtn { border: 1px solid var(--line); background: var(--panel); border-radius: 6px; padding: 2px 9px; cursor: pointer; font-size: 13px; }
-.tbtn[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+a { color: var(--accent); }
+code, pre { font-family: var(--mono); }
 
-.layout { display: grid; grid-template-columns: 340px minmax(0, 1fr); }
-nav { border-right: 1px solid var(--line); padding: 6px 0 16px; overflow-y: auto; height: calc(100vh - 49px); position: sticky; top: 49px; }
-.project { display: flex; align-items: center; gap: 8px; width: 100%; border: 0; background: none; cursor: pointer; text-align: left; padding: 14px 20px 6px; font-size: 14px; font-weight: 600; }
-.project:not(:first-child) { border-top: 1px solid var(--line); margin-top: 8px; }
-.project .chev { flex: none; width: 10px; color: var(--muted); font-size: 10px; }
-.project:hover .chev { color: var(--text); }
-.project .pname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+/* ---------------------------------------------------------------- app bar */
+header#top { flex: none; min-height: 52px; padding: 8px 20px; display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: center; border-bottom: 1px solid var(--line); background: var(--side); }
+header#top h1 { margin: 0; font-size: 16px; font-weight: 650; letter-spacing: -.01em; white-space: nowrap; }
+.summary { color: var(--muted); font-size: 13px; display: flex; flex-wrap: wrap; gap: 4px 12px; }
+.summary b { color: var(--text); font-weight: 650; }
+.summary .urgent b { color: var(--urgent); }
+.tools { margin-left: auto; display: flex; flex-wrap: wrap; gap: 6px 8px; align-items: center; font-size: 12px; color: var(--muted); }
+.limits.high { color: var(--warn); font-weight: 600; }
+.tbtn { border: 1px solid var(--line); background: transparent; border-radius: 8px; padding: 3px 10px; cursor: pointer; font-size: 13px; }
+.tbtn:hover { background: var(--hover); }
+.tbtn[aria-pressed="true"] { background: var(--accent-soft); border-color: transparent; color: var(--accent); }
+
+/* ---------------------------------------------------------------- columns */
+.app { flex: 1; min-height: 0; display: grid; grid-template-columns: 300px minmax(0, 1fr) 340px; }
+nav#nav { min-height: 0; overflow-y: auto; background: var(--side); border-right: 1px solid var(--line); padding: 4px 0 24px; overscroll-behavior: contain; }
+main#main { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+aside#side { min-height: 0; overflow-y: auto; background: var(--side); border-left: 1px solid var(--line); overscroll-behavior: contain; }
+body.special aside#side { display: none; }
+body.special main#main { grid-column: 2 / -1; }
+@media (min-width: 1680px) { .app { grid-template-columns: 320px minmax(0, 1fr) 400px; } :root { --col: 940px; } }
+@media (max-width: 1279px) { .app { grid-template-columns: 280px minmax(0, 1fr); } aside#side { display: none; } }
+@media (max-width: 1023px) { .app { grid-template-columns: 248px minmax(0, 1fr); } }
+
+/* ---------------------------------------------------------------- session list */
+.project { display: flex; align-items: center; gap: 8px; width: 100%; border: 0; background: none; cursor: pointer; text-align: left; padding: 14px 18px 6px; font-size: 13px; font-weight: 650; color: var(--muted); letter-spacing: .01em; }
+.project:not(:first-child) { margin-top: 6px; }
+.project .chev { flex: none; width: 10px; font-size: 10px; }
+.project:hover { color: var(--text); }
+.project .pname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; color: var(--text); }
 .counts { margin-left: auto; display: flex; gap: 4px; align-items: center; }
-.c { font-size: 11px; font-weight: 600; min-width: 18px; text-align: center; border-radius: 9px; padding: 0 5px; line-height: 17px; }
+.c { font-size: 11px; font-weight: 650; min-width: 18px; text-align: center; border-radius: 9px; padding: 0 5px; line-height: 17px; }
 .c.needs-answer { background: var(--urgent); color: var(--bg); }
 .c.your-turn { background: var(--accent-soft); color: var(--accent); }
 .c.other { color: var(--muted); font-weight: 400; padding: 0; }
-.fold { display: block; width: 100%; border: 0; background: none; cursor: pointer; text-align: left; padding: 4px 20px 4px 36px; font-size: 12px; color: var(--muted); }
+.fold { display: block; width: 100%; border: 0; background: none; cursor: pointer; text-align: left; padding: 4px 18px 4px 36px; font-size: 12px; color: var(--muted); }
 .fold:hover { color: var(--text); }
-.session { display: block; width: 100%; text-align: left; border: 0; background: none; padding: 7px 20px 7px 17px; cursor: pointer; border-left: 3px solid transparent; }
-.session:hover { background: var(--selected); }
-.session[aria-current="true"] { background: var(--selected); border-left-color: var(--accent); }
+.session { display: block; width: calc(100% - 12px); margin: 1px 6px; text-align: left; border: 0; background: none; padding: 7px 12px 8px 10px; cursor: pointer; border-radius: 8px; }
+.session:hover { background: var(--hover); }
+.session[aria-current="true"] { background: var(--selected); }
 .session:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-.row1 { display: flex; gap: 6px; align-items: center; }
+.row1 { display: flex; gap: 7px; align-items: center; }
 .row1 .name { font-weight: 600; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
-.row1 .age { margin-left: auto; color: var(--muted); font-size: 12px; white-space: nowrap; font-variant-numeric: tabular-nums; }
-.row2 { display: flex; gap: 6px; font-size: 13px; color: var(--muted); padding-left: 16px; min-width: 0; }
+.row1 .age { margin-left: auto; color: var(--faint); font-size: 12px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.row2 { display: flex; gap: 6px; font-size: 13px; color: var(--muted); padding-left: 15px; min-width: 0; margin-top: 1px; }
 .row2 .where { white-space: nowrap; }
 .row2 .agent { flex: none; }
 .row2 .snip { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
-.dot { flex: none; width: 8px; height: 8px; border-radius: 50%; border: 1.5px solid var(--muted); }
+.dot { flex: none; width: 8px; height: 8px; border-radius: 50%; border: 1.5px solid var(--faint); }
 .dot.needs-answer { background: var(--urgent); border-color: var(--urgent); }
 .dot.your-turn { background: var(--accent); border-color: var(--accent); }
-.dot.working { border-style: dashed; animation: spin 2.4s linear infinite; }
+.dot.working { border-style: dashed; border-color: var(--muted); animation: spin 2.4s linear infinite; }
 .dot.closed { border-color: var(--line); }
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .dot.working { animation: none; } }
-.chip { flex: none; font-size: 11px; font-weight: 600; border: 1px solid currentColor; border-radius: 9px; padding: 0 5px; line-height: 15px; color: var(--muted); }
+.chip { flex: none; font-size: 11px; font-weight: 650; border: 1px solid currentColor; border-radius: 9px; padding: 0 5px; line-height: 15px; color: var(--muted); }
 .chip.ask, .chip.failing, .chip.conflict { color: var(--urgent); }
 .chip.pending, .chip.ctx { color: var(--warn); }
 .chip.passing { color: var(--ok); }
-.agent { font-weight: 600; font-size: 12px; }
+.agent { font-weight: 650; font-size: 12px; }
 .agent.claude { color: var(--claude); }
 .agent.codex { color: var(--codex); }
-.id { font-family: var(--mono); font-size: 12px; }
-.nav-empty { color: var(--muted); font-size: 13px; padding: 12px 20px; }
-.keys { color: var(--muted); font-size: 12px; padding: 20px 20px 0; }
+.nav-empty { color: var(--muted); font-size: 13px; padding: 14px 18px; }
+.keys { color: var(--faint); font-size: 12px; padding: 18px 18px 0; }
 kbd { font-family: var(--mono); font-size: 11px; border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; }
 
-main { padding: 24px 32px 64px; min-width: 0; max-width: 1100px; }
-.head h2 { margin: 0 0 4px; font-size: 20px; font-weight: 600; display: flex; flex-wrap: wrap; align-items: center; gap: 10px; overflow-wrap: anywhere; }
-.pill { font-size: 12px; font-weight: 600; border-radius: 10px; padding: 1px 9px; background: var(--selected); color: var(--muted); white-space: nowrap; }
+/* ---------------------------------------------------------------- session head and tabs */
+.shead { flex: none; padding: 14px 24px 0; }
+.shead-row { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.back { display: none; flex: none; border: 0; background: none; font-size: 26px; line-height: 1; padding: 0 6px 2px 0; margin-left: -4px; cursor: pointer; color: var(--accent); }
+.shead h2 { margin: 0; font-size: 19px; font-weight: 650; letter-spacing: -.01em; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pill { flex: none; font-size: 12px; font-weight: 650; border-radius: 10px; padding: 1px 9px; background: var(--hover); color: var(--muted); white-space: nowrap; }
 .pill.needs-answer { background: var(--urgent-soft); color: var(--urgent); }
 .pill.your-turn { background: var(--accent-soft); color: var(--accent); }
-.meta { color: var(--muted); font-size: 13px; display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: center; }
+.meta { color: var(--muted); font-size: 13px; display: flex; flex-wrap: wrap; gap: 2px 14px; align-items: center; margin-top: 4px; }
 .meta .path { font-family: var(--mono); font-size: 12px; overflow-wrap: anywhere; }
-.actions { margin: 14px 0 0; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-.block { margin-top: 20px; }
-.label { font-size: 12px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); margin-bottom: 6px; }
-.wait { border: 1px solid var(--urgent); border-radius: 8px; background: var(--panel); padding: 12px 16px; box-shadow: inset 3px 0 0 var(--urgent); }
-.reason { display: inline-block; padding: 2px 8px; border-radius: 6px; background: var(--urgent-soft); color: var(--urgent); font-family: var(--mono); font-size: 13px; overflow-wrap: anywhere; }
-.q { margin-top: 10px; }
+.actions { margin: 10px 0 0; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.tabs { flex: none; display: flex; gap: 2px; padding: 10px 20px 0; border-bottom: 1px solid var(--line); overflow-x: auto; scrollbar-width: none; }
+.tabs button { border: 0; background: none; padding: 8px 10px 9px; font-size: 14px; color: var(--muted); cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px; white-space: nowrap; }
+.tabs button:hover { color: var(--text); }
+.tabs button[aria-selected="true"] { color: var(--text); font-weight: 600; border-bottom-color: var(--accent); }
+.tabs .n { color: var(--faint); font-weight: 400; margin-left: 3px; }
+
+/* ---------------------------------------------------------------- panes */
+.pane { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.pane.scroll { display: block; overflow-y: auto; overscroll-behavior: contain; }
+.col { max-width: var(--col); margin: 0 auto; padding: 18px 24px 40px; }
+.col.wide { max-width: 1240px; }
+
+/* ---------------------------------------------------------------- conversation */
+.chat { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.chat .col { padding-bottom: 20px; }
+.earlier, .start { text-align: center; margin: 4px 0 18px; }
+.start { color: var(--faint); font-size: 12px; }
+.when { text-align: center; color: var(--faint); font-size: 12px; margin: 22px 0 10px; font-variant-numeric: tabular-nums; }
+.msg { margin: 10px 0; }
+.msg.me { display: flex; flex-direction: column; align-items: flex-end; }
+.bubble { max-width: min(82%, 640px); background: var(--bubble); border-radius: 18px 18px 6px 18px; padding: 9px 14px; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.7; }
+.bubble.long { max-height: 15em; overflow: hidden; -webkit-mask-image: linear-gradient(#000 70%, transparent); mask-image: linear-gradient(#000 70%, transparent); }
+.msg.me.command .bubble, .msg.me.shell .bubble { background: transparent; border: 1px solid var(--line); font-size: 13px; }
+.msg.me.answer .bubble { background: var(--accent-soft); }
+.more-btn { margin-top: 4px; font-size: 13px; }
+.msg.ai { padding-right: 4%; }
+.md { line-height: 1.75; overflow-wrap: anywhere; }
+.md > :first-child { margin-top: 0; }
+.md > :last-child { margin-bottom: 0; }
+.md p { margin: 0 0 .7em; }
+.md h1, .md h2, .md h3, .md h4, .md h5, .md h6 { margin: 1.1em 0 .45em; line-height: 1.35; font-weight: 650; }
+.md h1 { font-size: 1.35em; } .md h2 { font-size: 1.2em; } .md h3 { font-size: 1.07em; } .md h4, .md h5, .md h6 { font-size: 1em; }
+.md ul, .md ol { margin: 0 0 .7em; padding-left: 1.4em; }
+.md li { margin: .15em 0; }
+.md li > p { margin: 0 0 .3em; }
+.md li > ul, .md li > ol { margin-bottom: .2em; }
+.md .task { color: var(--muted); } .md .task.done { color: var(--ok); }
+.md blockquote { margin: 0 0 .7em; padding: 0 0 0 12px; border-left: 3px solid var(--line); color: var(--muted); }
+.md hr { border: 0; border-top: 1px solid var(--line); margin: 1em 0; }
+.md code { font-size: .88em; background: var(--code-bg); padding: .1em .35em; border-radius: 5px; }
+.md pre.code { margin: 0 0 .8em; padding: 10px 12px; background: var(--code-bg); border-radius: 8px; overflow-x: auto; font-size: 12.5px; line-height: 1.55; }
+.md pre.code code { background: none; padding: 0; font-size: inherit; }
+.md .table { overflow-x: auto; margin: 0 0 .8em; }
+.md table { border-collapse: collapse; font-size: .93em; }
+.md th, .md td { border-bottom: 1px solid var(--line); padding: 5px 12px 5px 0; text-align: left; vertical-align: top; }
+.md th { font-weight: 650; color: var(--muted); }
+a.file { text-decoration: underline dotted; text-underline-offset: 2px; }
+.md code a.file { color: inherit; }
+.steps { margin: 6px 0; font-size: 13px; color: var(--muted); }
+.steps > summary { list-style: none; cursor: pointer; display: flex; flex-wrap: wrap; gap: 2px 8px; align-items: baseline; padding: 3px 0; width: fit-content; max-width: 100%; }
+.steps > summary::-webkit-details-marker { display: none; }
+.steps > summary::before { content: "▸"; font-size: 10px; width: 10px; color: var(--faint); }
+.steps[open] > summary::before { content: "▾"; }
+.steps > summary:hover { color: var(--text); }
+.steps .count { font-weight: 600; }
+.steps .names { color: var(--faint); }
+.steps .failed { color: var(--urgent); }
+.steps .latest { flex-basis: 100%; padding-left: 18px; font-family: var(--mono); font-size: 12px; color: var(--faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.steps ol { list-style: none; margin: 4px 0 6px 4px; padding: 0 0 0 12px; border-left: 2px solid var(--line); }
+.step { display: flex; gap: 10px; padding: 2px 0; min-width: 0; }
+.step .tname { flex: none; min-width: 52px; font-weight: 600; color: var(--muted); }
+.step .tdetail { font-family: var(--mono); font-size: 12px; color: var(--faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.step.failed .tname { color: var(--urgent); }
+.event { text-align: center; color: var(--faint); font-size: 12px; margin: 14px 0; }
+.event.warn { color: var(--warn); }
+.event-box { margin: 10px 0; font-size: 13px; color: var(--muted); }
+.event-box > summary { cursor: pointer; }
+.event-box .md, .event-box pre { margin-top: 8px; }
+.event-box pre { background: var(--code-bg); border-radius: 8px; padding: 10px 12px; font-size: 12px; overflow-x: auto; }
+.recap { margin: 16px 0; padding: 2px 0 2px 14px; border-left: 3px solid var(--accent); }
+.label { font-size: 11px; font-weight: 650; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); margin-bottom: 4px; }
+
+/* ---------------------------------------------------------------- dock: question, keys, reply */
+.dock { flex: none; border-top: 1px solid var(--line); background: var(--bg); }
+.dock .col { padding: 10px 24px calc(12px + env(safe-area-inset-bottom)); }
+.asking { padding: 2px 0 2px 12px; border-left: 3px solid var(--urgent); margin-bottom: 8px; }
+.asking-top { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; }
+.reason { font-family: var(--mono); font-size: 13px; color: var(--urgent); overflow-wrap: anywhere; }
+.q { margin-top: 8px; font-weight: 600; }
 .opts { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
-.opts span { border: 1px solid var(--line); border-radius: 12px; padding: 0 10px; font-size: 13px; }
-.box { border: 1px solid var(--line); border-radius: 8px; background: var(--panel); padding: 12px 16px; }
-.reply { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 14px; max-height: 45vh; overflow-y: auto; }
-.reply code, .summary-text code { font-family: var(--mono); font-size: 12.5px; background: var(--selected); padding: 0 4px; border-radius: 3px; }
-.reply b { font-weight: 600; }
-.asked { color: var(--muted); font-size: 14px; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 7.5em; overflow: hidden; }
-.screen { margin: 10px 0 0; padding: 10px 12px; background: var(--selected); border-radius: 6px; font-family: var(--mono); font-size: 12.5px; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 40vh; overflow-y: auto; }
-.keypad { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
-.keypad button { min-width: 36px; }
-textarea.prompt { width: 100%; min-height: 84px; resize: vertical; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); padding: 8px 10px; }
-.note { color: var(--muted); font-size: 14px; padding: 8px 0; }
-.note:empty { display: none; }
+.opt { border: 1px solid var(--line); background: transparent; border-radius: 10px; padding: 4px 12px; font-size: 14px; text-align: left; }
+button.opt { cursor: pointer; }
+button.opt:hover { border-color: var(--accent); color: var(--accent); }
+.keypad { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; align-items: center; }
+.key { min-width: 38px; border: 1px solid var(--line); background: transparent; border-radius: 8px; padding: 3px 9px; cursor: pointer; font-size: 13px; font-family: var(--mono); }
+.key:hover { background: var(--hover); }
+.screen { margin: 10px 0 0; padding: 10px 12px; background: var(--code-bg); border-radius: 8px; font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 28vh; overflow-y: auto; }
+.composer { display: flex; gap: 8px; align-items: flex-end; border: 1px solid var(--line); background: var(--field); border-radius: 14px; padding: 6px 6px 6px 12px; }
+.composer:focus-within { border-color: var(--accent); }
+.composer textarea { flex: 1; min-width: 0; border: 0; background: transparent; resize: none; outline: none; padding: 5px 0; line-height: 1.5; max-height: 35vh; }
+.hint { margin: 6px 2px 0; }
 .sub { color: var(--muted); font-size: 12px; }
+.note { color: var(--muted); font-size: 14px; margin: 6px 0; }
+.note:empty { display: none; }
 .note.ok { color: var(--ok); }
-.btn { border: 1px solid var(--line); background: var(--panel); border-radius: 6px; padding: 4px 12px; cursor: pointer; font-size: 14px; }
-.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--bg); }
+.note.error, .error { color: var(--del-text); }
+.empty { color: var(--muted); padding: 48px 0; text-align: center; }
+
+/* ---------------------------------------------------------------- buttons */
+.btn { border: 1px solid var(--line); background: transparent; border-radius: 8px; padding: 4px 12px; cursor: pointer; font-size: 14px; white-space: nowrap; }
+.btn:hover { background: var(--hover); }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: 600; }
+.btn.primary:hover { filter: brightness(1.06); }
 .btn.small { padding: 1px 8px; font-size: 12px; }
-code.cmd { font-family: var(--mono); font-size: 13px; background: var(--selected); padding: 2px 6px; border-radius: 4px; overflow-wrap: anywhere; }
-.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
-.tasks { list-style: none; margin: 0; padding: 0; font-size: 14px; }
+.linkish { border: 0; background: none; padding: 0; color: var(--accent); cursor: pointer; text-decoration: underline; font-size: inherit; }
+code.cmd { font-size: 12.5px; background: var(--code-bg); padding: 2px 6px; border-radius: 5px; overflow-wrap: anywhere; }
+
+/* ---------------------------------------------------------------- details */
+#info { padding: 6px 0 32px; }
+.sec { padding: 14px 20px; border-bottom: 1px solid var(--line); }
+.sec:last-child { border-bottom: 0; }
+.sec h3 { margin: 0 0 8px; font-size: 11px; font-weight: 650; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); display: flex; gap: 8px; align-items: baseline; }
+.sec h3 .n { text-transform: none; letter-spacing: 0; font-weight: 600; color: var(--text); }
+.sec.warn { background: var(--warn-soft); }
+.sec.warn h3 { color: var(--warn); }
+#pane-details #info { max-width: var(--col); margin: 0 auto; padding: 6px 4px 40px; }
+.tasks, .list { list-style: none; margin: 0; padding: 0; font-size: 14px; }
 .tasks li { display: flex; gap: 8px; padding: 2px 0; }
 .tasks .mark { flex: none; width: 1.2em; text-align: center; color: var(--muted); }
 .tasks .completed { color: var(--muted); text-decoration: line-through; }
 .tasks .in_progress .mark { color: var(--accent); }
-.bar { height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; margin: 4px 0 8px; }
+.list li { padding: 3px 0; overflow-wrap: anywhere; }
+.bar { height: 5px; border-radius: 3px; background: var(--line); overflow: hidden; margin: 2px 0 8px; }
 .bar > span { display: block; height: 100%; background: var(--accent); }
 .bar.warn > span { background: var(--warn); }
 .bar.full > span { background: var(--urgent); }
-.list { list-style: none; margin: 0; padding: 0; font-size: 14px; }
-.list li { padding: 3px 0; overflow-wrap: anywhere; }
-.list .sub { color: var(--muted); font-size: 12px; }
 .ci-failing { color: var(--urgent); } .ci-pending { color: var(--warn); } .ci-passing { color: var(--ok); }
-.warnbox { border: 1px solid var(--warn); background: var(--warn-soft); border-radius: 8px; padding: 10px 14px; font-size: 14px; }
-.linkish { border: 0; background: none; padding: 0; color: var(--accent); cursor: pointer; text-decoration: underline; font-size: inherit; }
+.kv { display: grid; grid-template-columns: auto 1fr; gap: 3px 12px; font-size: 13px; }
+.kv dt { color: var(--muted); }
+.kv dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
 
-.changes { margin-top: 32px; border-top: 1px solid var(--line); padding-top: 20px; }
+/* ---------------------------------------------------------------- files */
+.crumbs { display: flex; flex-wrap: wrap; gap: 2px; align-items: center; font-family: var(--mono); font-size: 13px; margin-bottom: 12px; }
+.crumbs button { border: 0; background: none; padding: 2px 4px; border-radius: 5px; cursor: pointer; color: var(--accent); font: inherit; }
+.crumbs button:hover { background: var(--hover); }
+.crumbs .sep { color: var(--faint); }
+.crumbs .here { padding: 2px 4px; font-weight: 600; }
+.file-meta { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; margin: -4px 0 12px; }
+.dir { list-style: none; margin: 0; padding: 0; }
+.entry { display: flex; gap: 10px; width: 100%; align-items: baseline; border: 0; background: none; text-align: left; padding: 6px 8px; border-radius: 7px; cursor: pointer; font-family: var(--mono); font-size: 13px; }
+.entry:hover { background: var(--hover); }
+.entry .ico { flex: none; width: 12px; color: var(--faint); font-size: 10px; }
+.entry .nm { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.entry.folder .nm { color: var(--accent); }
+.entry .sz { margin-left: auto; flex: none; color: var(--faint); font-size: 12px; font-variant-numeric: tabular-nums; }
+pre.code.numbered { margin: 0; padding: 10px 0; background: var(--code-bg); border-radius: 8px; overflow-x: auto; font-size: 12.5px; line-height: 1.6; }
+pre.code.numbered code { counter-reset: ln; display: block; min-width: max-content; }
+.ln { display: block; padding: 0 16px 0 4.2em; position: relative; white-space: pre; }
+.ln::before { counter-increment: ln; content: counter(ln); position: absolute; left: 0; width: 3.2em; text-align: right; color: var(--faint); }
+.doc { max-width: 760px; }
+img.shot { max-width: 100%; height: auto; border-radius: 8px; border: 1px solid var(--line); }
+
+/* ---------------------------------------------------------------- changes */
 .changes-head { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; margin-bottom: 14px; }
-.changes-head h3 { margin: 0; font-size: 16px; font-weight: 600; }
-.changes-head .sub { color: var(--muted); font-size: 13px; }
+.changes-head h3 { margin: 0; font-size: 16px; font-weight: 650; }
+.changes-head .sub { font-size: 13px; }
 .ranges { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-left: auto; }
-.ranges button { border: 1px solid var(--line); background: var(--panel); border-radius: 6px; padding: 2px 9px; cursor: pointer; font-size: 13px; }
-.ranges button[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
-.ranges input { border: 1px solid var(--line); background: var(--panel); border-radius: 6px; padding: 2px 8px; width: 160px; font-size: 13px; }
+.ranges button { border: 1px solid var(--line); background: transparent; border-radius: 8px; padding: 2px 9px; cursor: pointer; font-size: 13px; }
+.ranges button[aria-pressed="true"] { background: var(--accent-soft); border-color: transparent; color: var(--accent); }
+.ranges input { border: 1px solid var(--line); background: var(--field); border-radius: 8px; padding: 2px 8px; width: 160px; font-size: 13px; }
 .stage-row { margin: 0 0 16px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-.review { border: 1px solid var(--accent); background: var(--accent-soft); border-radius: 8px; padding: 10px 14px; margin-bottom: 16px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-size: 14px; }
-.plan { border: 1px solid var(--line); background: var(--panel); border-radius: 8px; padding: 12px 16px; margin-bottom: 16px; font-size: 14px; }
+.review { border-left: 3px solid var(--accent); background: var(--accent-soft); border-radius: 0 8px 8px 0; padding: 10px 14px; margin-bottom: 16px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-size: 14px; }
+.plan { border-left: 3px solid var(--line); padding: 4px 0 4px 14px; margin-bottom: 16px; font-size: 14px; }
 .plan ul { margin: 6px 0 12px; padding-left: 18px; font-family: var(--mono); font-size: 13px; }
-.file { border: 1px solid var(--line); border-radius: 8px; background: var(--panel); margin-bottom: 16px; overflow: hidden; }
-.file > summary { list-style: none; cursor: pointer; padding: 8px 14px; display: flex; gap: 10px; align-items: baseline; border-bottom: 1px solid var(--line); }
+.file { border: 1px solid var(--line); border-radius: 10px; margin-bottom: 16px; overflow: hidden; }
+.file > summary { list-style: none; cursor: pointer; padding: 8px 14px; display: flex; gap: 10px; align-items: baseline; border-bottom: 1px solid var(--line); background: var(--side); }
 .file:not([open]) > summary { border-bottom: 0; }
 .file > summary::-webkit-details-marker { display: none; }
 .file .path { font-family: var(--mono); font-size: 13px; overflow-wrap: anywhere; }
@@ -154,45 +289,70 @@ code.cmd { font-family: var(--mono); font-size: 13px; background: var(--selected
 .st { font-family: var(--mono); font-size: 12px; font-weight: 700; width: 1ch; }
 .st.A { color: var(--add-text); } .st.D { color: var(--del-text); } .st.M, .st.R { color: var(--likely); }
 .diff { overflow-x: auto; font-family: var(--mono); font-size: 12.5px; line-height: 1.55; }
-.hunk-head { display: flex; gap: 10px; align-items: center; padding: 4px 14px; color: var(--hunk); background: var(--selected); white-space: pre; }
-.hunk-head .comment-btn { margin-left: auto; font-family: system-ui, sans-serif; }
-.badge { font-family: system-ui, sans-serif; font-size: 11px; border: 1px solid currentColor; border-radius: 10px; padding: 0 7px; }
+.hunk-head { display: flex; gap: 10px; align-items: center; padding: 4px 14px; color: var(--hunk); background: var(--code-bg); white-space: pre; }
+.hunk-head .comment-btn { margin-left: auto; font-family: var(--sans); }
+.badge { font-family: var(--sans); font-size: 11px; border: 1px solid currentColor; border-radius: 10px; padding: 0 7px; }
 .badge.recorded { color: var(--recorded); } .badge.sure { color: var(--sure); } .badge.likely { color: var(--likely); } .badge.maybe { color: var(--maybe); }
 .l { white-space: pre; padding: 0 14px; min-width: max-content; }
 .l.add { background: var(--add-bg); color: var(--add-text); }
 .l.del { background: var(--del-bg); color: var(--del-text); }
-.comment { font-family: system-ui, sans-serif; font-size: 14px; padding: 8px 14px; border-top: 1px dashed var(--line); background: var(--accent-soft); display: flex; gap: 8px; align-items: flex-start; white-space: pre-wrap; }
-.comment textarea { flex: 1; min-height: 56px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); padding: 6px 8px; }
+.comment { font-family: var(--sans); font-size: 14px; padding: 8px 14px; border-top: 1px dashed var(--line); background: var(--accent-soft); display: flex; gap: 8px; align-items: flex-start; white-space: pre-wrap; }
+.comment textarea { flex: 1; min-height: 56px; border: 1px solid var(--line); border-radius: 8px; background: var(--field); padding: 6px 8px; }
 .comment .text { flex: 1; overflow-wrap: anywhere; }
 .more { padding: 4px 14px; color: var(--muted); font-size: 12px; }
-.empty, .error { color: var(--muted); padding: 48px 0; text-align: center; }
-.error { color: var(--del-text); }
 .legend { color: var(--muted); font-size: 12px; margin-top: 24px; display: flex; flex-wrap: wrap; gap: 4px 16px; }
+
+/* ---------------------------------------------------------------- clean up, remote */
+.page-head h2 { margin: 0 0 4px; font-size: 20px; font-weight: 650; display: flex; align-items: center; gap: 8px; }
+.block { margin-top: 22px; }
 table.clean { width: 100%; border-collapse: collapse; font-size: 14px; }
-table.clean td, table.clean th { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+table.clean td, table.clean th { text-align: left; padding: 7px 8px 7px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
 table.clean th { font-size: 12px; color: var(--muted); font-weight: 600; }
 .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.pair { display: flex; flex-wrap: wrap; gap: 16px; align-items: center; }
+.wt { padding: 10px 0; border-bottom: 1px solid var(--line); }
+.pair { display: flex; flex-wrap: wrap; gap: 16px; align-items: center; margin-top: 14px; }
 .pair .qr { width: 200px; height: 200px; background: #fff; padding: 6px; border-radius: 8px; }
 .pair .qr svg { width: 100%; height: 100%; }
 .pair p { margin: 0 0 8px; font-size: 14px; }
 
-@media (max-width: 760px) {
-  header { padding: 6px 16px; gap: 6px 10px; }
+/* ---------------------------------------------------------------- touch */
+@media (pointer: coarse) {
+  .btn, .tbtn { min-height: 36px; }
+  .key, .opt { min-height: 40px; }
+  .session { padding-top: 10px; padding-bottom: 11px; }
+  .entry { padding: 9px 8px; }
+  .tabs button { padding: 10px 12px 11px; }
+}
+
+/* ---------------------------------------------------------------- phone: a list, then a session */
+@media (max-width: 699px) {
+  header#top { padding: 8px 16px; gap: 6px 10px; }
   .summary .optional, .tools .optional { display: none; }
-  .layout { grid-template-columns: 1fr; }
-  nav { position: static; height: auto; max-height: 42vh; border-right: 0; border-bottom: 1px solid var(--line); }
-  .project { padding-left: 16px; padding-right: 16px; }
-  .fold { padding-left: 32px; }
-  .session { padding: 6px 16px 6px 13px; }
+  .tools { margin-left: 0; width: 100%; }
+  .app { grid-template-columns: minmax(0, 1fr); }
+  nav#nav { border-right: 0; }
+  body[data-view="list"] main#main { display: none; }
+  body[data-view="session"] nav#nav, body[data-view="session"] header#top { display: none; }
+  body.special main#main { grid-column: auto; }
+  .back { display: inline-flex; }
+  .shead { padding: 10px 16px 0; }
+  .shead h2 { font-size: 17px; }
+  .meta .path { display: none; }
+  .actions { margin-top: 8px; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; padding-bottom: 2px; }
+  .actions .btn { padding: 3px 11px; font-size: 13px; }
+  .tabs { padding: 6px 10px 0; }
+  .col { padding: 14px 16px 32px; }
+  .dock .col { padding: 8px 12px calc(10px + env(safe-area-inset-bottom)); }
+  .bubble { max-width: 88%; }
+  .msg.ai { padding-right: 0; }
   .keys { display: none; }
-  main { padding: 16px 16px 48px; }
   .ranges { margin-left: 0; }
+  .sec { padding-left: 16px; padding-right: 16px; }
 }
 </style>
 </head>
-<body>
-<header>
+<body data-view="list">
+<header id="top">
   <h1>Agent Diff</h1>
   <div class="summary" id="summary"></div>
   <div class="tools">
@@ -203,16 +363,25 @@ table.clean th { font-size: 12px; color: var(--muted); font-weight: 600; }
     <span class="optional" id="updated"></span>
   </div>
 </header>
-<div class="layout">
+<div class="app" id="app">
   <nav id="nav" aria-label="Sessions"><div class="nav-empty">Looking for sessions…</div></nav>
   <main id="main">
-    <div id="detail"></div>
-    <div id="answer"></div>
-    <div id="info"></div>
-    <section id="changes" class="changes" hidden></section>
+    <div class="shead" id="head"></div>
+    <div class="tabs" id="tabs" role="tablist"></div>
+    <section class="pane" id="pane-chat">
+      <div class="chat" id="chat"><div class="col" id="chat-col"></div></div>
+      <div class="dock"><div class="col" id="dock"></div></div>
+    </section>
+    <section class="pane scroll" id="pane-changes" hidden><div class="col wide"><section id="changes" class="changes"></section></div></section>
+    <section class="pane scroll" id="pane-files" hidden><div class="col wide" id="files"></div></section>
+    <section class="pane scroll" id="pane-details" hidden></section>
+    <section class="pane scroll" id="pane-special" hidden><div class="col" id="special"></div></section>
   </main>
+  <aside id="side" aria-label="About this session"><div id="info"></div></aside>
 </div>
 <script>
+/*@markdown*/
+
 const params = new URLSearchParams(location.hash.slice(1));
 const token = params.get("t") || "";
 /** "remote": served through the tunnel to a device signed in with a passkey (no token, a cookie). */
@@ -222,15 +391,20 @@ let selected = params.get("s") || null;
 let inbox = null; // running sessions, in every repository
 let prev = null; // the inbox before, to notice sessions that start waiting
 let home = null; // changes in the repository the page was started in (sessions that ended, unattributed)
-let shown = { detail: "", answer: "", info: "", changes: "" }; // what each part shows, to repaint only on change
+let shown = {}; // what each part shows, to repaint only on change
 const views = new Map(); // `${repo}|${range}` → { at, view }
 const screens = new Map(); // session → its herdr screen, once asked for
 const drafts = new Map(); // session → the prompt being written
+const TABS = ["chat", "changes", "files", "details"];
+/** Phones show the list or a session; wide screens show the details beside the conversation. */
+const phone = matchMedia("(max-width: 699px)");
+const wide = matchMedia("(min-width: 1280px)");
+let pushed = false; // a session was opened over the list (phones), so Back returns to it
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
-/** Escaped text with the Markdown agents use most inline: `code` and **bold**. */
-const inline = (t) => esc(t).replace(/`([^`\n]+)`/g, "<code>$1</code>").replace(/\*\*([^*\n]+)\*\*/g, "<b>$1</b>");
+/** Escaped text with its web links made links: what you typed to a session. */
+const linkify = (s) => esc(s).replace(/https?:\/\/[\w\-.~:/?#[\]@!$&*+,;=%()]*[\w\-~/#@$&*+=%]/g, (u) => `<a href="${u}" target="_blank" rel="noopener noreferrer">${u}</a>`);
 const pad2 = (n) => String(n).padStart(2, "0");
 const when = (ms) => (ms ? `${new Date(ms).getMonth() + 1}/${new Date(ms).getDate()} ${pad2(new Date(ms).getHours())}:${pad2(new Date(ms).getMinutes())}` : "");
 function age(ms) {
@@ -247,6 +421,7 @@ const agentName = (a) => (a === "codex" ? "Codex" : "Claude");
 const hunkWord = (n) => `${n} hunk${n === 1 ? "" : "s"}`;
 const plural = (n, w) => `${n} ${w}${n === 1 ? "" : "s"}`;
 const kTokens = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : `${Math.round(n / 1000)}k`);
+const bytes = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)} MB` : n >= 1e3 ? `${Math.round(n / 1e3)} KB` : `${n} B`);
 const nameOf = (i) => i.title || i.name;
 /** The views that are not a session: clean-up and remote access. */
 const special = () => selected === "cleanup" || selected === "remote";
@@ -281,10 +456,11 @@ const saveFold = () => store("fold", { projects: [...fold.projects], idle: [...f
 const toggle = (set, k) => (set.has(k) ? set.delete(k) : set.add(k));
 let comments = stored("comments", {}); // session → [{ file, header, excerpt, text }]
 let notifyOn = stored("notify", false) && typeof Notification !== "undefined" && Notification.permission === "granted";
+let tab = TABS.includes(stored("tab", "chat")) ? stored("tab", "chat") : "chat";
 
+const headers = () => ({ "content-type": "application/json", "x-agent-diff": "1", ...(token && { "x-token": token }) });
 async function api(path, init = {}) {
-  const headers = { "content-type": "application/json", "x-agent-diff": "1", ...(token && { "x-token": token }) };
-  const res = await fetch(path, { ...init, headers, credentials: "same-origin" });
+  const res = await fetch(path, { ...init, headers: headers(), credentials: "same-origin" });
   if (res.status === 401 && mode === "remote") {
     location.assign("/login"); // the session ended: sign in again
     throw new Error("Signing in again…");
@@ -302,7 +478,7 @@ function saveHash() {
     p.set(k, decodeURIComponent(v));
   }
   if (selected) p.set("s", selected);
-  history.replaceState(null, "", "#" + p.toString());
+  history.replaceState(history.state, "", "#" + p.toString());
 }
 
 // ------------------------------------------------------------ data
@@ -320,6 +496,8 @@ async function loadInbox() {
   if (inbox.home && !home) await loadHome();
   notifyChanges();
   paint();
+  // What the selected session wrote since: cheap, only the new end of its transcript.
+  if (tab === "chat" && chat.key === selected && chat.state === "ready") void loadChat("newer");
 }
 
 async function loadHome() {
@@ -463,6 +641,8 @@ function paintNav() {
   }
   if (!html) html = `<div class="nav-empty">${inbox ? "No running sessions." : "Looking for sessions…"}</div>`;
   html += `<div class="keys"><kbd>↑</kbd> <kbd>↓</kbd> or <kbd>j</kbd> <kbd>k</kbd> to move</div>`;
+  if (html === shown.nav) return;
+  shown.nav = html;
   const scroll = $("nav").scrollTop;
   $("nav").innerHTML = html;
   $("nav").scrollTop = scroll;
@@ -511,7 +691,7 @@ function notifyChanges() {
       const n = new Notification(title, { body, tag: i.key });
       n.onclick = () => {
         window.focus();
-        select(i.key);
+        openSession(i.key);
         n.close();
       };
     } catch {
@@ -530,104 +710,273 @@ $("notify").onclick = async () => {
   paintHeader();
 };
 
-// ------------------------------------------------------------ detail
+// ------------------------------------------------------------ session head and tabs
 
-function paintDetail(e) {
-  if (special()) return;
+function paintHead(e) {
+  const i = e && e.item;
+  const key = JSON.stringify(e ? { k: e.key, s: e.state, i: i && [i.title, i.name, i.cwd, i.since, i.jobId, i.herdr, i.hold, i.agent, Math.round((i.memory || 0) / 5e7)], x: e.session && e.session.lastAt } : null);
+  if (key === shown.head) return;
+  shown.head = key;
+  const back = `<button class="back" data-act="back" aria-label="Back to the sessions">‹</button>`;
   if (!e) {
-    $("detail").innerHTML = `<div class="empty">${inbox ? "No running sessions, and no changes here." : "Looking for sessions…"}</div>`;
+    $("head").innerHTML = `<div class="shead-row">${back}<h2>${inbox ? "No running sessions" : "Looking for sessions…"}</h2></div>`;
     return;
   }
   if (e.key === "unknown") {
-    $("detail").innerHTML = `<div class="head"><h2>Unattributed</h2><div class="meta"><span class="path">${esc(home.root)}</span></div></div>
-      <p class="note">Edited by hand, by a tool, or by a session older than the transcripts read. With <code class="cmd">agent-diff install</code>, future shell edits are recorded too.</p>`;
+    $("head").innerHTML = `<div class="shead-row">${back}<h2>Unattributed</h2></div><div class="meta"><span class="path">${esc(home.root)}</span><span>Edited by hand, by a tool, or by a session older than the transcripts read</span></div>`;
     return;
   }
   if (e.session) {
     const s = e.session;
-    $("detail").innerHTML = `<div class="head"><h2>${esc(s.title || "(untitled)")}<span class="pill">Not running</span></h2>
-      <div class="meta"><span class="agent ${s.agent}">${agentName(s.agent)}</span><span class="id">${esc(s.id)}</span><span>${when(s.firstAt)} – ${when(s.lastAt)}</span></div></div>`;
+    $("head").innerHTML = `<div class="shead-row">${back}<h2>${esc(s.title || "(untitled)")}</h2><span class="pill">Not running</span></div>
+      <div class="meta"><span class="agent ${s.agent}">${agentName(s.agent)}</span><span>${when(s.firstAt)} – ${when(s.lastAt)}</span></div>`;
     return;
   }
-  const i = e.item;
   const meta = [
     `<span class="agent ${i.agent}">${agentName(i.agent)}</span>`,
     i.title && i.title !== i.name ? `<span>${esc(i.name)}</span>` : "",
     `<span class="path">${esc(i.cwd || "")}</span>`,
     `<span title="${esc(new Date(i.since).toLocaleString())}">${ago(i.since)}</span>`,
-    i.jobId ? `<span>background session ${esc(i.jobId)}</span>` : "",
     i.herdr ? `<span title="herdr pane">herdr ${esc(i.herdr.pane)} · ${esc(i.herdr.status)}</span>` : "",
-    i.memory ? `<span>${Math.round(i.memory / 1e6)} MB</span>` : "",
   ].join("");
   const held = i.hold ? `<span class="pill">${i.hold.kind === "later" && i.hold.until ? `Later, until ${esc(when(i.hold.until))}` : "Done for now"}</span>` : "";
-  let html = `<div class="head"><h2>${esc(nameOf(i))}<span class="pill ${i.state}">${STATE[i.state]}</span>${held}</h2><div class="meta">${meta}</div></div>`;
-  html += `<div class="actions">`;
-  if (i.herdr) html += `<button class="btn" data-act="focus">Go to its pane</button>`;
-  if (i.hold) html += `<button class="btn" data-act="release">Back on the list</button>`;
-  else if (waiting(i) || i.state === "stale") html += `<button class="btn" data-act="later" data-until="1h">Later (1 h)</button><button class="btn" data-act="later" data-until="tomorrow">Tomorrow</button><button class="btn" data-act="done" title="Off the list until it does something new">Done</button>`;
-  html += `<code class="cmd">${esc(i.resume)}</code><button class="btn small" data-copy="${esc(i.resume)}">Copy</button><span class="note" id="act-note"></span></div>`;
-  if (i.state === "needs-answer") {
-    html += `<div class="block wait"><span class="reason">${esc(i.reason || "input needed")}</span>`;
-    for (const q of i.questions || []) html += `<div class="q">${esc(q.question)}${q.options.length ? `<div class="opts">${q.options.map((o, n) => `<span>${n + 1}. ${esc(o)}</span>`).join("")}</div>` : ""}</div>`;
-    html += `</div>`;
-  } else if (i.reason) html += `<div class="block"><span class="pill">${esc(i.reason)}</span></div>`;
+  let actions = "";
+  if (i.herdr) actions += `<button class="btn" data-act="focus">Go to its pane</button>`;
+  if (i.hold) actions += `<button class="btn" data-act="release">Back on the list</button>`;
+  else if (waiting(i) || i.state === "stale") actions += `<button class="btn" data-act="later" data-until="1h">Later (1 h)</button><button class="btn" data-act="later" data-until="tomorrow">Tomorrow</button><button class="btn" data-act="done" title="Off the list until it does something new">Done</button>`;
+  $("head").innerHTML = `<div class="shead-row">${back}<h2 title="${esc(nameOf(i))}">${esc(nameOf(i))}</h2><span class="pill ${i.state}">${STATE[i.state]}</span>${held}</div>
+    <div class="meta">${meta}</div>${actions ? `<div class="actions">${actions}<span class="note" id="act-note"></span></div>` : `<span class="note" id="act-note"></span>`}`;
+}
+
+function paintTabs(e) {
+  const changes = e && e.item && e.item.conflicts && e.item.conflicts.length ? `<span class="n">⚠</span>` : "";
+  const list = [["chat", "Conversation"], ["changes", "Changes" + changes], ["files", "Files"]];
+  if (!wide.matches) list.push(["details", "Details"]);
+  const html = list.map(([k, label]) => `<button role="tab" data-tab="${k}" aria-selected="${tab === k}">${label}</button>`).join("");
+  if (html !== shown.tabs) $("tabs").innerHTML = shown.tabs = html;
+}
+
+/** Which part shows, and where the details go: beside the conversation, or in their own tab. */
+function layout() {
+  const sp = special();
+  document.body.classList.toggle("special", sp);
+  if (wide.matches && tab === "details") tab = "chat";
+  for (const t of TABS) $("pane-" + t).hidden = sp || tab !== t;
+  $("pane-special").hidden = !sp;
+  $("head").hidden = $("tabs").hidden = sp;
+  const slot = wide.matches ? $("side") : $("pane-details");
+  if ($("info").parentNode !== slot) slot.appendChild($("info"));
+}
+
+// ------------------------------------------------------------ conversation
+
+const newChat = (key) => ({ key, messages: [], before: undefined, end: 0, state: key ? "loading" : "none", error: "", busy: false, open: new Set() });
+let chat = newChat(null);
+
+/** The latest page, an earlier one, or what was written since. */
+async function loadChat(kind) {
+  const c = chat;
+  if (!c.key || c.busy || (kind === "earlier" && c.before === undefined)) return;
+  c.busy = true;
+  try {
+    let q = `/api/chat?key=${encodeURIComponent(c.key)}`;
+    if (kind === "earlier") q += `&before=${c.before}`;
+    if (kind === "newer") q += `&after=${c.end}`;
+    const page = await api(q);
+    if (chat !== c) return; // another session was picked meanwhile
+    if (page.reset) {
+      chat = newChat(c.key);
+      return void loadChat("latest");
+    }
+    if (kind === "latest") {
+      Object.assign(c, { messages: page.messages, before: page.before, end: page.end, state: "ready" });
+      paintChat("bottom");
+    } else if (kind === "earlier") {
+      c.messages = page.messages.concat(c.messages);
+      c.before = page.before;
+      paintChat("keep");
+    } else {
+      c.end = page.end;
+      if (page.messages.length) {
+        c.messages = c.messages.concat(page.messages);
+        paintChat("follow");
+      }
+    }
+  } catch (err) {
+    if (chat !== c || kind !== "latest") return;
+    c.state = "error";
+    c.error = err.message;
+    paintChat();
+  } finally {
+    c.busy = false;
+  }
+}
+
+function syncChat(e) {
+  const key = e && e.item ? e.key : null;
+  if (chat.key === key && (key || chat.state === "none")) {
+    if (key === null) paintChat(); // a closed session or none: say so
+    return;
+  }
+  chat = newChat(key);
+  paintChat();
+  if (key) void loadChat("latest");
+}
+
+function paintChat(scroll) {
+  const box = $("chat");
+  const atEnd = box.scrollTop + box.clientHeight >= box.scrollHeight - 80;
+  const height = box.scrollHeight;
+  const top = box.scrollTop;
+  $("chat-col").innerHTML = chatHtml();
+  if (scroll === "bottom" || (scroll === "follow" && atEnd)) box.scrollTop = box.scrollHeight;
+  else if (scroll === "keep") box.scrollTop = top + (box.scrollHeight - height);
+}
+
+function chatHtml() {
+  const c = chat;
+  const e = entry(selected);
+  if (!c.key) {
+    if (e && (e.session || e.key === "unknown")) return `<div class="empty">This session is not running; its changes are under <button class="linkish" data-tab="changes">Changes</button>.</div>`;
+    return `<div class="empty">${inbox ? "Pick a session." : "Looking for sessions…"}</div>`;
+  }
+  if (c.state === "loading") return `<div class="empty">Reading the conversation…</div>`;
+  if (c.state === "error") return `<div class="empty error">${esc(c.error)}</div>`;
+  let html = c.before !== undefined ? `<div class="earlier"><button class="btn small" data-act="earlier">Earlier messages</button></div>` : `<div class="start">The start of the conversation</div>`;
+  let steps = [];
+  let lastAt = 0;
+  const flush = (last) => {
+    if (steps.length) html += stepsHtml(steps, last);
+    steps = [];
+  };
+  for (const m of c.messages) {
+    if (m.role === "tool") {
+      steps.push(m);
+      if (m.at) lastAt = m.at;
+      continue;
+    }
+    flush(false);
+    if (m.at && m.role === "user" && (!lastAt || m.at - lastAt > 20 * 6e4 || new Date(m.at).toDateString() !== new Date(lastAt).toDateString())) html += `<div class="when">${esc(when(m.at))}</div>`;
+    if (m.at) lastAt = m.at;
+    html += msgHtml(m);
+  }
+  flush(true);
+  if (!c.messages.length) html += `<div class="empty">Nothing said yet.</div>`;
+  return html;
+}
+
+function msgHtml(m) {
+  const t = m.at ? ` title="${esc(new Date(m.at).toLocaleString())}"` : "";
+  const cut = m.truncated ? `<div class="sub">… cut here; the rest is in the transcript.</div>` : "";
+  if (m.role === "user") {
+    const text = m.text || "";
+    const long = text.length > 700 || text.split("\n").length > 12;
+    const body = m.kind === "command" || m.kind === "shell" ? `<code>${esc(text)}</code>` : linkify(text);
+    return `<div class="msg me${m.kind ? " " + esc(m.kind) : ""}"${t}><div class="bubble${long ? " long" : ""}">${body}${cut}</div>${long ? '<button class="linkish more-btn" data-act="expand">Show all</button>' : ""}</div>`;
+  }
+  if (m.role === "assistant") return `<div class="msg ai"${t}><div class="md">${markdown(m.text)}</div>${cut}</div>`;
+  if (m.kind === "recap") return `<div class="recap"${t}><div class="label">While you were away</div><div class="md">${markdown(m.text)}</div></div>`;
+  if (m.kind === "summary") return `<details class="event-box"${t}><summary>The conversation before, summarized</summary><div class="md">${markdown(m.text)}</div></details>`;
+  if (m.kind === "output") return `<details class="event-box"${t}><summary>Output</summary><pre><code>${esc(m.text)}</code></pre></details>`;
+  return `<div class="event${m.kind === "interrupted" ? " warn" : ""}"${t}>${esc(m.text)}</div>`;
+}
+
+/** A run of tool calls as one line that opens into the list; the last run shows its latest step. */
+function stepsHtml(steps, last) {
+  const id = steps[0].id;
+  const counts = new Map();
+  for (const s of steps) counts.set(s.tool, (counts.get(s.tool) || 0) + 1);
+  const names = [...counts].sort((a, b) => b[1] - a[1]).slice(0, 4).map(([n, k]) => (k > 1 ? `${n} ×${k}` : n)).join(" · ");
+  const failed = steps.filter((s) => s.error).length;
+  const latest = steps[steps.length - 1];
+  const step = (s) => {
+    const d = s.detail ? (s.path ? `<a href="#" class="file" data-file="${esc(s.path)}">${esc(s.detail)}</a>` : esc(s.detail)) : "";
+    return `<li class="step${s.error ? " failed" : ""}"><span class="tname">${esc(s.tool)}</span><span class="tdetail">${d}</span></li>`;
+  };
+  return `<details class="steps" data-group="${esc(id)}"${chat.open.has(id) ? " open" : ""}><summary><span class="count">${plural(steps.length, "step")}</span><span class="names">${esc(names)}</span>${failed ? `<span class="failed">${failed} failed</span>` : ""}${last && latest.detail ? `<span class="latest">${esc(latest.tool)}: ${esc(latest.detail)}</span>` : ""}</summary><ol>${steps.map(step).join("")}</ol></details>`;
+}
+
+// ------------------------------------------------------------ dock: answering through herdr
+
+function paintDock(e) {
+  const i = e && e.item;
+  const key = i ? JSON.stringify([i.key, i.state, !!i.herdr, i.reason, i.questions, i.hold]) : e ? e.key : "";
+  if (key === shown.dock) return;
+  shown.dock = key;
+  let html = "";
+  if (i && i.state === "needs-answer") html += askHtml(i);
+  if (i && i.herdr && i.state !== "needs-answer") {
+    html += `<div class="composer"><textarea id="prompt" rows="1" aria-label="Message to the session" placeholder="${i.state === "working" ? "Queue a message for" : "Reply to"} ${esc(nameOf(i))}" title="Ctrl+Enter sends">${esc(drafts.get(i.key) || "")}</textarea><button class="btn primary" data-act="prompt">Send</button></div>`;
+    if (i.state === "working") html += `<p class="sub hint">It is working; your message waits in its queue.</p>`;
+  } else if (i && !i.herdr && (waiting(i) || i.state === "needs-answer")) {
+    html += `<p class="note">To answer from this page, run it in a <a href="https://herdr.dev" target="_blank" rel="noopener">herdr</a> pane. Or go back to it: <code class="cmd">${esc(i.resume)}</code> <button class="btn small" data-copy="${esc(i.resume)}">Copy</button></p>`;
+  }
+  $("dock").parentElement.hidden = !html;
+  $("dock").innerHTML = html + `<p class="note" id="answer-note"></p>`;
+  if ($("prompt")) grow($("prompt"));
+  // What it asks, as its screen shows it.
+  if (i && i.state === "needs-answer" && i.herdr && !screens.has(i.key)) void act("screen");
+}
+
+function askHtml(i) {
+  let html = `<div class="asking"><div class="asking-top"><span class="reason">${esc(i.reason || "input needed")}</span></div>`;
+  let numbered = false;
+  for (const q of i.questions || []) {
+    html += `<div class="q">${esc(q.question)}</div>`;
+    if (!q.options.length) continue;
+    numbered = numbered || !!i.herdr;
+    html += `<div class="opts">${q.options.map((o, n) => (i.herdr ? `<button class="opt" data-key-press="${n + 1}">${n + 1}. ${esc(o)}</button>` : `<span class="opt">${n + 1}. ${esc(o)}</span>`)).join("")}</div>`;
+  }
+  if (i.herdr) {
+    const keys = [...(numbered ? [] : ["1", "2", "3", "4"]), "up", "down", "enter", "esc", "y", "n"];
+    const names = { up: "↑", down: "↓", enter: "Enter", esc: "Esc" };
+    html += `<div class="keypad">${keys.map((k) => `<button class="key" data-key-press="${k}">${names[k] || k}</button>`).join("")}<button class="btn small" data-act="screen">Its screen</button></div>`;
+    html += `<pre class="screen" id="screen" ${screens.has(i.key) ? "" : "hidden"}>${esc(screens.get(i.key) || "")}</pre>`;
+  }
+  return html + `</div>`;
+}
+
+function grow(t) {
+  t.style.height = "auto";
+  t.style.height = Math.min(t.scrollHeight + 2, Math.round(innerHeight * 0.35)) + "px";
+}
+
+// ------------------------------------------------------------ details
+
+function paintInfo(e) {
+  const i = e && e.item;
+  const key = JSON.stringify(i ? [i.key, i.state, i.reason, i.tasks, i.background, i.prs && i.prs.map((p) => [p.url, (inbox.prStatus || {})[p.url]]), i.context, i.pages, i.conflicts, i.cwd, i.resume, i.memory && Math.round(i.memory / 5e7), i.jobId] : e ? e.key : null);
+  if (key === shown.info) return;
+  shown.info = key;
+  if (!i) {
+    $("info").innerHTML = e && e.session ? `<section class="sec"><h3>Session</h3><code class="cmd">${esc(e.session.id)}</code></section>` : "";
+    return;
+  }
+  const sec = (title, body, cls = "") => `<section class="sec${cls}"><h3>${title}</h3>${body}</section>`;
+  let html = "";
   if (i.conflicts && i.conflicts.length) {
     const other = (k) => {
       const o = inbox.items.find((x) => x.key === k);
       return `<button class="linkish" data-goto="${esc(k)}">${esc(o ? nameOf(o) : k.split(":")[1].slice(0, 8))}</button>`;
     };
-    html += `<div class="block warnbox"><b>Shared files.</b> Another running session has uncommitted changes in the same ${plural(i.conflicts.length, "file")}:<ul class="list">${i.conflicts.map((c) => `<li><code class="cmd">${esc(c.path)}</code> with ${c.with.map(other).join(", ")}</li>`).join("")}</ul>Staging with <code class="cmd">agent-diff add</code> keeps each session's hunks apart.</div>`;
+    html += sec("Shared files", `<p class="note">Another running session has uncommitted changes in the same ${plural(i.conflicts.length, "file")}:</p><ul class="list">${i.conflicts.map((c) => `<li><code class="cmd">${esc(c.path)}</code> with ${c.with.map(other).join(", ")}</li>`).join("")}</ul><p class="sub">Staging with <code class="cmd">agent-diff add</code> keeps each session's hunks apart.</p>`, " warn");
   }
-  if (i.awaySummary) html += `<div class="block"><div class="label">While you were away</div><div class="box summary-text">${inline(i.awaySummary)}</div></div>`;
-  if (i.lastPrompt) html += `<div class="block"><div class="label">You asked</div><div class="asked">${esc(i.lastPrompt)}</div></div>`;
-  $("detail").innerHTML = html;
-}
-
-/** Answering from the page, through herdr: the screen and keys when it asks, a prompt otherwise. */
-function paintAnswer(e) {
-  const i = e && e.item;
-  if (!i || special()) return void ($("answer").innerHTML = "");
-  if (!i.herdr) {
-    $("answer").innerHTML = waiting(i) ? `<p class="note">To answer from this page, run the session in a <a href="https://herdr.dev" target="_blank" rel="noopener">herdr</a> pane. Otherwise go back to it with the command above.</p>` : "";
-    return;
-  }
-  let html = `<div class="block box"><div class="label">Answer here</div>`;
-  if (i.state === "needs-answer") {
-    const keys = ["1", "2", "3", "4", "up", "down", "enter", "esc", "y", "n"];
-    const names = { up: "↑", down: "↓", enter: "Enter", esc: "Esc" };
-    html += `<div class="keypad">${keys.map((k) => `<button class="btn" data-key-press="${k}">${names[k] || k}</button>`).join("")}<button class="btn small" data-act="screen">Show its screen</button></div>`;
-    html += `<pre class="screen" id="screen" ${screens.has(i.key) ? "" : "hidden"}>${esc(screens.get(i.key) || "")}</pre>`;
-  } else {
-    html += `<textarea class="prompt" id="prompt" placeholder="Send ${esc(nameOf(i))} a prompt (Ctrl+Enter)">${esc(drafts.get(i.key) || "")}</textarea>
-      <div class="actions"><button class="btn primary" data-act="prompt">Send</button>${i.state === "working" ? '<span class="note">It is working; the prompt waits in its queue.</span>' : ""}</div>`;
-  }
-  html += `<p class="note" id="answer-note"></p></div>`;
-  $("answer").innerHTML = html;
-}
-
-function paintInfo(e) {
-  const i = e && e.item;
-  if (!i || special()) return void ($("info").innerHTML = "");
-  let html = "";
-  const text = i.lastMessage;
-  if (text) html += `<div class="block"><div class="label">Last reply</div><div class="box reply" id="reply">${inline(text)}</div></div>`;
-  const cards = [];
+  if (i.reason && i.state !== "needs-answer") html += sec("Now", `<div>${esc(i.reason)}</div>`);
   if (i.tasks && i.tasks.length) {
     const done = i.tasks.filter((t) => t.status === "completed").length;
     const mark = { completed: "✓", in_progress: "▸", pending: "○" };
-    cards.push(`<div class="box"><div class="label">Tasks ${done}/${i.tasks.length}</div><div class="bar"><span style="width:${Math.round((done / i.tasks.length) * 100)}%"></span></div>
-      <ul class="tasks">${i.tasks.map((t) => `<li class="${esc(t.status)}"><span class="mark">${mark[t.status] || "○"}</span><span>${esc(t.status === "in_progress" && t.activeForm ? t.activeForm : t.subject)}</span></li>`).join("")}</ul></div>`);
+    html += sec(`Tasks <span class="n">${done}/${i.tasks.length}</span>`, `<div class="bar"><span style="width:${Math.round((done / i.tasks.length) * 100)}%"></span></div><ul class="tasks">${i.tasks.map((t) => `<li class="${esc(t.status)}"><span class="mark">${mark[t.status] || "○"}</span><span>${esc(t.status === "in_progress" && t.activeForm ? t.activeForm : t.subject)}</span></li>`).join("")}</ul>`);
   }
   if (i.background && i.background.length) {
-    cards.push(`<div class="box"><div class="label">In the background</div><ul class="list">${i.background
+    html += sec("In the background", `<ul class="list">${i.background
       .map((b) => {
         const long = Date.now() - b.since > 6 * 36e5;
         return `<li>${b.kind === "monitor" ? "Watching: " : ""}${esc(b.command)} <span class="sub${long ? " ci-pending" : ""}">running ${esc(age(b.since))}${long ? " — still needed?" : ""}</span></li>`;
       })
-      .join("")}</ul></div>`);
+      .join("")}</ul>`);
   }
   if (i.prs && i.prs.length) {
-    cards.push(`<div class="box"><div class="label">Pull requests</div><ul class="list">${i.prs
+    html += sec("Pull requests", `<ul class="list">${i.prs
       .map((p) => {
         const s = inbox.prStatus && inbox.prStatus[p.url];
         if (!s) return `<li><a href="${esc(p.url)}" target="_blank" rel="noopener">#${esc(p.number)}</a> <span class="sub">${esc(p.repo)} · looking it up…</span></li>`;
@@ -636,21 +985,104 @@ function paintInfo(e) {
         const extra = [s.draft ? "draft" : "", s.review ? s.review.toLowerCase().replace(/_/g, " ") : "", s.mergeState === "DIRTY" ? "has conflicts" : ""].filter(Boolean).join(" · ");
         return `<li><a href="${esc(p.url)}" target="_blank" rel="noopener">#${esc(p.number)}</a> ${esc(s.title)} <div class="sub"><span class="ci-${esc(s.ci)}">${esc(ci)}</span>${extra ? ` · ${esc(extra)}` : ""}</div></li>`;
       })
-      .join("")}</ul></div>`);
+      .join("")}</ul>`);
+  }
+  if (i.pages && i.pages.length) {
+    html += sec("Pages it published", `<ul class="list">${i.pages
+      .slice()
+      .reverse()
+      .map((p) => `<li><a href="${esc(p.url)}" target="_blank" rel="noopener noreferrer">${esc(p.title || p.url.replace(/^https?:\/\//, ""))}</a> <span class="sub">${esc(age(p.at))} ago</span></li>`)
+      .join("")}</ul>`);
   }
   if (i.context) {
     const c = i.context;
     const limit = c.window || c.lastCompactTokens;
     const level = contextLevel(c);
     const what = c.tokens === undefined ? "unknown until its next request" : `${kTokens(c.tokens)} tokens${limit ? ` of ${c.window ? `a ${kTokens(c.window)} window` : `${kTokens(limit)} (where it last compacted)`}` : ""}`;
-    cards.push(`<div class="box"><div class="label">Context</div>${limit && c.tokens !== undefined ? `<div class="bar ${level}"><span style="width:${Math.min(100, Math.round((c.tokens / limit) * 100))}%"></span></div>` : ""}<div class="sub">${esc(what)}${c.compactions ? ` · compacted ${c.compactions}×` : ""}${level === "full" ? " · nearly full: it will compact soon" : ""}</div></div>`);
+    html += sec("Context", `${limit && c.tokens !== undefined ? `<div class="bar ${level}"><span style="width:${Math.min(100, Math.round((c.tokens / limit) * 100))}%"></span></div>` : ""}<div class="sub">${esc(what)}${c.compactions ? ` · compacted ${c.compactions}×` : ""}${level === "full" ? " · nearly full: it will compact soon" : ""}</div>`);
   }
-  if (cards.length) html += `<div class="block grid">${cards.join("")}</div>`;
-  const scroll = $("reply") ? $("reply").scrollTop : null;
-  const atEnd = $("reply") ? $("reply").scrollTop + $("reply").clientHeight >= $("reply").scrollHeight - 4 : true;
+  const facts = [
+    ["Folder", `<span class="path">${esc(i.cwd || "")}</span> <button class="linkish" data-open="">Browse</button>`],
+    i.jobId ? ["Background", esc(i.jobId)] : null,
+    i.memory ? ["Memory", `${Math.round(i.memory / 1e6)} MB`] : null,
+  ].filter(Boolean);
+  html += sec("Session", `<dl class="kv">${facts.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("")}</dl><div class="actions"><code class="cmd">${esc(i.resume)}</code><button class="btn small" data-copy="${esc(i.resume)}">Copy</button></div>`);
   $("info").innerHTML = html;
-  const reply = $("reply");
-  if (reply) reply.scrollTop = atEnd || scroll === null ? reply.scrollHeight : scroll; // the end is where a question usually is
+}
+
+// ------------------------------------------------------------ files
+
+let files = { key: null, path: null, view: null, error: "", loading: false, img: "" };
+
+/** Opens a folder or file of the selected session: "" is its own folder. */
+async function openFiles(path) {
+  const key = selected;
+  if (files.img) URL.revokeObjectURL(files.img);
+  files = { key, path, view: files.key === key ? files.view : null, error: "", loading: true, img: "" };
+  paintFiles();
+  try {
+    const q = `?key=${encodeURIComponent(key)}&path=${encodeURIComponent(path)}`;
+    const v = await api(`/api/files${q}`);
+    let img = "";
+    if (v.kind === "image") {
+      const res = await fetch(`/api/files/image${q}`, { headers: headers(), credentials: "same-origin" });
+      if (res.ok) img = URL.createObjectURL(await res.blob());
+    }
+    if (files.key !== key || files.path !== path) return;
+    Object.assign(files, { view: v, loading: false, img });
+  } catch (err) {
+    if (files.key !== key || files.path !== path) return;
+    Object.assign(files, { error: err.message, loading: false });
+  }
+  paintFiles();
+  $("pane-files").scrollTop = 0;
+}
+
+function syncFiles(e) {
+  if (!e || !e.item) {
+    files = { key: null, path: null, view: null, error: "", loading: false, img: "" };
+    $("files").innerHTML = `<div class="empty">Files are shown for running sessions.</div>`;
+    return;
+  }
+  if (files.key !== e.key) void openFiles("");
+}
+
+const parentOf = (rel) => rel.split("/").slice(0, -1).join("/");
+const under = (v, rel) => (rel ? `${v.root}/${rel}` : v.root);
+
+function paintFiles() {
+  const v = files.view;
+  let html = "";
+  if (v) {
+    const parts = v.rel ? v.rel.split("/") : [];
+    const crumbs = [`<button data-open="${esc(v.root)}" title="${esc(v.root)}">${esc(base(v.root))}</button>`];
+    parts.forEach((p, n) => {
+      const here = n === parts.length - 1;
+      crumbs.push(`<span class="sep">/</span>${here ? `<span class="here">${esc(p)}</span>` : `<button data-open="${esc(under(v, parts.slice(0, n + 1).join("/")))}">${esc(p)}</button>`}`);
+    });
+    html += `<nav class="crumbs">${crumbs.join("")}</nav>`;
+    if (v.kind !== "dir") html += `<div class="file-meta sub"><span>${bytes(v.size)}</span><span>changed ${esc(ago(v.mtime))}</span><button class="btn small" data-copy="${esc(under(v, v.rel))}">Copy path</button></div>`;
+  }
+  if (files.error) html += `<p class="note error">${esc(files.error)}</p>`;
+  if (files.loading) html += `<p class="note">Opening…</p>`;
+  else if (v && !files.error) html += v.kind === "dir" ? dirHtml(v) : fileHtml(v);
+  $("files").innerHTML = html;
+}
+
+function dirHtml(v) {
+  if (!v.entries.length) return `<p class="note">An empty folder.</p>`;
+  const up = v.rel ? `<li><button class="entry folder" data-open="${esc(under(v, parentOf(v.rel)))}"><span class="ico">↰</span><span class="nm">..</span></button></li>` : "";
+  return `<ul class="dir">${up}${v.entries
+    .map((d) => `<li><button class="entry${d.dir ? " folder" : ""}" data-open="${esc(under(v, v.rel ? `${v.rel}/${d.name}` : d.name))}"><span class="ico">${d.dir ? "▸" : ""}</span><span class="nm">${esc(d.name)}${d.dir ? "/" : ""}</span>${d.size !== undefined ? `<span class="sz">${bytes(d.size)}</span>` : ""}</button></li>`)
+    .join("")}</ul>${v.more ? `<p class="note">${v.more} more not shown.</p>` : ""}`;
+}
+
+function fileHtml(v) {
+  const cut = v.truncated ? `<p class="note">Only the start of this file is shown.</p>` : "";
+  if (v.kind === "markdown") return `<article class="md doc" data-dir="${esc(under(v, parentOf(v.rel)))}">${markdown(v.text)}</article>${cut}`;
+  if (v.kind === "text") return `<pre class="code numbered"><code>${v.text.replace(/\n$/, "").split("\n").map((l) => `<span class="ln">${esc(l) || " "}</span>`).join("")}</code></pre>${cut}`;
+  if (v.kind === "image") return files.img ? `<img class="shot" src="${files.img}" alt="${esc(base(v.rel))}">` : `<p class="note">Could not load the image.</p>`;
+  return `<p class="note">A binary file; not shown.</p>`;
 }
 
 // ------------------------------------------------------------ changes
@@ -715,10 +1147,19 @@ function repoOf(e) {
   return home ? home.root : null;
 }
 
+function syncChanges(e) {
+  const i = e && e.item;
+  const key = e ? `${e.key}|${e.state}|${i ? i.since : ""}` : "";
+  if (key === shown.changesFor) return;
+  const same = shown.changesFor && shown.changesFor.split("|")[0] === (e && e.key);
+  shown.changesFor = key;
+  // Same session in a new state (it finished a turn, wrote more): read its changes again.
+  void paintChanges(e, same);
+}
+
 async function paintChanges(e, fresh = false) {
   const box = $("changes");
-  if (!e || special()) return void (box.hidden = true);
-  box.hidden = false;
+  if (!e) return void (box.innerHTML = "");
   const repo = repoOf(e);
   const head = (sub) => `<div class="changes-head"><h3>Changes</h3><span class="sub">${sub}</span>${repo ? rangesHtml() : ""}</div>`;
   if (!repo) {
@@ -785,21 +1226,22 @@ async function planStage(repo, s) {
 
 // ------------------------------------------------------------ clean up
 
+const pageHead = (title, sub) => `<div class="page-head"><h2><button class="back" data-act="back" aria-label="Back to the sessions">‹</button>${title}</h2>${sub ? `<div class="meta">${sub}</div>` : ""}</div>`;
+
 async function paintCleanup() {
-  $("answer").innerHTML = $("info").innerHTML = "";
-  $("changes").hidden = true;
-  $("detail").innerHTML = `<div class="head"><h2>Clean up</h2><div class="meta">Idle sessions and worktrees nobody uses. Nothing is closed or removed for you: copy the commands you want.</div></div><div class="note">Looking…</div>`;
+  const sub = "Idle sessions and worktrees nobody uses. Nothing is closed or removed for you: copy the commands you want.";
+  $("special").innerHTML = pageHead("Clean up", sub) + `<div class="note">Looking…</div>`;
   let c;
   try {
     c = await api("/api/cleanup");
   } catch (e) {
-    $("detail").innerHTML += `<div class="note error">${esc(e.message)}</div>`;
+    $("special").innerHTML += `<div class="note error">${esc(e.message)}</div>`;
     return;
   }
   if (selected !== "cleanup") return;
   const mb = (b) => `${Math.round(b / 1e6)} MB`;
   const total = c.sessions.reduce((n, s) => n + (s.memory || 0), 0);
-  let html = `<div class="head"><h2>Clean up</h2><div class="meta">Idle sessions and worktrees nobody uses. Nothing is closed or removed for you: copy the commands you want.</div></div>`;
+  let html = pageHead("Clean up", sub);
   html += `<div class="block"><div class="label">Idle sessions · ${c.sessions.length}${total ? ` · ${mb(total)} in all` : ""}</div>`;
   html += c.sessions.length
     ? `<table class="clean"><tr><th>Session</th><th>Idle</th><th class="num">Memory</th><th>Close</th></tr>${c.sessions
@@ -815,65 +1257,128 @@ async function paintCleanup() {
         .map((w) => {
           const why = w.prunable ? "its folder is gone" : w.merged ? "merged" : "its remote branch was deleted";
           const cmds = w.commands.join(" && ");
-          return `<div class="box" style="margin-bottom:8px"><code class="cmd">${esc(w.path)}</code> ${w.branch ? `<span class="sub">${esc(w.branch)}</span>` : ""} <span class="sub">· ${esc(why)}</span><div class="actions"><code class="cmd">${esc(cmds)}</code><button class="btn small" data-copy="${esc(cmds)}">Copy</button></div></div>`;
+          return `<div class="wt"><code class="cmd">${esc(w.path)}</code> ${w.branch ? `<span class="sub">${esc(w.branch)}</span>` : ""} <span class="sub">· ${esc(why)}</span><div class="actions"><code class="cmd">${esc(cmds)}</code><button class="btn small" data-copy="${esc(cmds)}">Copy</button></div></div>`;
         })
         .join("")
     : `<p class="note">None.</p>`;
   if (kept.length) html += `<p class="note">Kept: ${kept.map((w) => `${esc(base(w.path))} (${w.sessions.length ? "in use" : w.dirty ? "uncommitted changes" : w.locked ? "locked" : "not merged"})`).join(", ")}</p>`;
   html += `</div>`;
-  $("detail").innerHTML = html;
+  $("special").innerHTML = html;
+}
+
+// ------------------------------------------------------------ remote access
+
+async function paintRemote() {
+  let r;
+  try {
+    r = await api("/api/remote");
+  } catch (e) {
+    $("special").innerHTML = pageHead("Remote") + `<div class="note error">${esc(e.message)}</div>`;
+    return;
+  }
+  if (selected !== "remote") return;
+  let html = pageHead(
+    "Remote",
+    r.origin
+      ? `Open <a href="${esc(r.origin)}" target="_blank" rel="noopener">${esc(r.origin)}</a> on a device you added, and sign in with its passkey.`
+      : "Remote access is off. Start <code class=\"cmd\">agent-diff view --remote https://…</code> behind a Cloudflare Tunnel to use this page from your phone.",
+  );
+  html += `<div class="actions">${mode === "local" && r.origin ? '<button class="btn primary" data-remote="pair">Add a phone</button>' : ""}${mode === "remote" ? '<button class="btn" data-remote="logout">Sign out</button>' : ""}</div><div id="pairing"></div>`;
+  html += `<div class="block"><div class="label">Devices · ${r.devices.length}</div>`;
+  html += r.devices.length
+    ? `<table class="clean"><tr><th>Device</th><th>Added</th><th>Last used</th><th></th></tr>${r.devices
+        .map((d) => `<tr><td>${esc(d.label)}${d.current ? ' <span class="sub">(this one)</span>' : ""}</td><td>${esc(when(d.createdAt))}</td><td>${esc(d.lastUsedAt ? when(d.lastUsedAt) : "")}</td><td><button class="btn small" data-remote="revoke" data-id="${esc(d.id)}">Remove</button></td></tr>`)
+        .join("")}</table>`
+    : `<p class="note">None yet.${mode === "local" && r.origin ? " Add one with the button above, or agent-diff remote pair." : ""}</p>`;
+  html += `</div><div class="block"><div class="label">Done from other devices</div>`;
+  html += r.log.length
+    ? `<ul class="list">${r.log.map((e) => `<li><span class="sub">${esc(when(e.at))}</span> <b>${esc(e.device)}</b> ${esc(e.action)}${e.target ? ` <code class="cmd">${esc(e.target)}</code>` : ""}${e.detail ? `<div class="sub">${esc(e.detail)}</div>` : ""}</li>`).join("")}</ul>`
+    : `<p class="note">Nothing yet.</p>`;
+  $("special").innerHTML = html + "</div>";
 }
 
 // ------------------------------------------------------------ painting and events
 
-/** Repaints the list; repaints each part of the detail only when what it shows changed. */
+/** Repaints what changed: the list, the header, and the parts of the session on show. */
 function paint() {
   pickDefault();
   saveHash();
   paintHeader();
   paintNav();
+  layout();
   if (special()) return;
   const e = entry(selected);
-  const i = e && e.item;
-  // Memory moves a little on every look; only repaint for a change worth showing.
-  const detailKey = JSON.stringify(e ? { k: e.key, s: e.state, i: i && { ...i, lastMessage: undefined, tasks: undefined, background: undefined, prs: undefined, context: undefined, memory: Math.round((i.memory || 0) / 5e7) }, x: e.session && e.session.lastAt } : null);
-  if (detailKey !== shown.detail) {
-    shown.detail = detailKey;
-    paintDetail(e);
-  }
-  const answerKey = i ? `${i.key}|${i.state}|${!!i.herdr}` : "";
-  if (answerKey !== shown.answer) {
-    shown.answer = answerKey;
-    paintAnswer(e);
-  }
-  const infoKey = JSON.stringify(i ? [i.lastMessage, i.tasks, i.background, i.prs && i.prs.map((p) => [p.url, (inbox.prStatus || {})[p.url]]), i.context] : null);
-  if (infoKey !== shown.info) {
-    shown.info = infoKey;
-    paintInfo(e);
-  }
-  const changesKey = e ? `${e.key}|${e.state}|${i ? i.since : ""}` : "";
-  if (changesKey !== shown.changesFor) {
-    const same = shown.changesFor && shown.changesFor.split("|")[0] === (e && e.key);
-    shown.changesFor = changesKey;
-    // Same session in a new state (it finished a turn, wrote more): read its changes again.
-    void paintChanges(e, same);
-  }
+  paintHead(e);
+  paintTabs(e);
+  paintInfo(e);
+  if (tab === "chat") {
+    syncChat(e);
+    paintDock(e);
+  } else if (tab === "changes") syncChanges(e);
+  else if (tab === "files") syncFiles(e);
 }
 
 function select(key) {
   if (!key) return;
   if (key !== selected) {
     selected = key;
-    shown = { detail: "", answer: "", info: "", changes: "" };
+    shown = {};
     $("changes").innerHTML = "";
   }
   if (key === "cleanup" || key === "remote") {
     saveHash();
     paintHeader();
     paintNav();
+    layout();
     void (key === "cleanup" ? paintCleanup() : paintRemote());
   } else paint();
-  window.scrollTo(0, 0);
+}
+
+/** Opens a session (or clean-up, remote); on a phone, over the list, so Back returns to it. */
+function openSession(key) {
+  if (phone.matches && document.body.dataset.view !== "session") {
+    history.pushState({ session: key }, "");
+    pushed = true;
+    document.body.dataset.view = "session";
+  }
+  select(key);
+}
+
+function back() {
+  if (pushed) return history.back();
+  document.body.dataset.view = "list";
+  if (special()) {
+    selected = null;
+    shown = {};
+  }
+  paint();
+}
+
+addEventListener("popstate", () => {
+  pushed = false;
+  if (document.body.dataset.view === "session") {
+    document.body.dataset.view = "list";
+    if (special()) selected = null;
+    shown = {};
+    paint();
+  }
+});
+phone.addEventListener("change", () => {
+  document.body.dataset.view = phone.matches ? "list" : "session";
+  shown = {};
+  paint();
+});
+wide.addEventListener("change", () => {
+  shown = {};
+  paint();
+});
+
+function setTab(t) {
+  if (!TABS.includes(t)) return;
+  tab = t;
+  store("tab", t);
+  paint();
+  if (t === "chat") $("chat").scrollTop = $("chat").scrollHeight;
 }
 
 function setRange(r) {
@@ -891,7 +1396,13 @@ async function act(name, el) {
     if (n) ((n.textContent = text), (n.className = "note" + (ok ? " ok" : " error")));
   };
   try {
-    if (name === "focus") {
+    if (name === "back") back();
+    else if (name === "earlier") await loadChat("earlier");
+    else if (name === "expand") {
+      const bubble = el.previousElementSibling;
+      bubble.classList.remove("long");
+      el.remove();
+    } else if (name === "focus") {
       await post("/api/herdr/focus", { key: i.key });
       note("act-note", "Focused in herdr.", true);
     } else if (name === "later" || name === "done") {
@@ -903,6 +1414,7 @@ async function act(name, el) {
     } else if (name === "screen") {
       const { text } = await api(`/api/herdr/screen?key=${encodeURIComponent(i.key)}`);
       screens.set(i.key, text);
+      if (!$("screen")) return;
       $("screen").textContent = text;
       $("screen").hidden = false;
       $("screen").scrollTop = $("screen").scrollHeight;
@@ -912,7 +1424,9 @@ async function act(name, el) {
       await post("/api/herdr/prompt", { key: i.key, text });
       drafts.delete(i.key);
       $("prompt").value = "";
+      grow($("prompt"));
       note("answer-note", "Sent.", true);
+      setTimeout(() => void loadChat("newer"), 1500);
     } else if (name === "copy-review") {
       await navigator.clipboard.writeText(reviewText(selected));
       note("review-note", "Copied. Paste it into the session.", true);
@@ -939,7 +1453,7 @@ async function pressKey(k) {
     await post("/api/herdr/keys", { key: i.key, keys: [k] });
     $("answer-note").textContent = `Sent ${k}.`;
     $("answer-note").className = "note ok";
-    setTimeout(() => $("screen") && !$("screen").hidden && act("screen"), 600); // show what it did
+    setTimeout(() => $("screen") && act("screen"), 600); // show what it did
   } catch (e) {
     $("answer-note").textContent = e.message;
     $("answer-note").className = "note error";
@@ -956,7 +1470,7 @@ $("nav").addEventListener("click", (ev) => {
     return;
   }
   const b = ev.target.closest(".session");
-  if (b) select(b.dataset.key);
+  if (b) openSession(b.dataset.key);
 });
 
 document.addEventListener("keydown", (ev) => {
@@ -965,22 +1479,43 @@ document.addEventListener("keydown", (ev) => {
   const step = ev.key === "ArrowDown" || ev.key === "j" ? 1 : ev.key === "ArrowUp" || ev.key === "k" ? -1 : 0;
   if (!step) return;
   const keys = [...$("nav").querySelectorAll(".session")].map((b) => b.dataset.key);
-  if (!keys.length) return;
+  if (!keys.length || phone.matches) return;
   ev.preventDefault();
   select(keys[Math.min(keys.length - 1, Math.max(0, keys.indexOf(selected) + step))]);
   const cur = $("nav").querySelector('.session[aria-current="true"]');
   if (cur) cur.scrollIntoView({ block: "nearest" });
 });
 
-$("main").addEventListener("click", (ev) => {
+/** One handler for the session parts: the conversation, its dock, the tabs, files, changes, details. */
+$("app").addEventListener("click", (ev) => {
   const t = ev.target;
+  if (t.closest("#nav")) return;
   const copy = t.closest("[data-copy]");
   if (copy) {
     navigator.clipboard?.writeText(copy.dataset.copy).then(() => ((copy.textContent = "Copied"), setTimeout(() => (copy.textContent = "Copy"), 1200)));
     return;
   }
+  const tb = t.closest("[data-tab]");
+  if (tb) return void setTab(tb.dataset.tab);
+  const file = t.closest("[data-file]");
+  if (file) {
+    ev.preventDefault();
+    let path = file.dataset.file;
+    // A relative link in a Markdown file is relative to that file.
+    const doc = file.closest(".doc");
+    if (doc && !/^[/~]/.test(path)) path = `${doc.dataset.dir}/${path}`;
+    void openFiles(path);
+    if (tab !== "files") setTab("files");
+    return;
+  }
+  const o = t.closest("[data-open]");
+  if (o) {
+    void openFiles(o.dataset.open);
+    if (tab !== "files") setTab("files");
+    return;
+  }
   const go = t.closest("[data-goto]");
-  if (go) return void select(go.dataset.goto);
+  if (go) return void openSession(go.dataset.goto);
   const a = t.closest("[data-act]");
   if (a) return void act(a.dataset.act, a);
   const k = t.closest("[data-key-press]");
@@ -1026,62 +1561,45 @@ $("main").addEventListener("click", (ev) => {
   }
 });
 
-$("main").addEventListener("keydown", (ev) => {
+// Remember which runs of steps were opened, across repaints.
+$("chat").addEventListener("toggle", (ev) => {
+  const d = ev.target;
+  if (!d.matches || !d.matches("details.steps")) return;
+  if (d.open) chat.open.add(d.dataset.group);
+  else chat.open.delete(d.dataset.group);
+}, true);
+// Scrolled to the top: read the page before.
+$("chat").addEventListener("scroll", () => {
+  if ($("chat").scrollTop < 40 && chat.state === "ready" && chat.before !== undefined) void loadChat("earlier");
+});
+
+$("app").addEventListener("keydown", (ev) => {
   if (ev.target.id === "custom" && ev.key === "Enter") setRange(rangeFromInput(ev.target.value));
   if (ev.target.id === "prompt" && ev.key === "Enter" && (ev.ctrlKey || ev.metaKey)) act("prompt");
 });
-$("main").addEventListener("input", (ev) => {
-  if (ev.target.id === "prompt") drafts.set(selected, ev.target.value);
+$("app").addEventListener("input", (ev) => {
+  if (ev.target.id === "prompt") {
+    drafts.set(selected, ev.target.value);
+    grow(ev.target);
+  }
 });
 
 for (const id of ["cleanup", "remote"]) {
   $(id).onclick = () => {
-    if (selected !== id) return select(id);
+    if (selected !== id) return openSession(id);
     selected = null; // back to the sessions
-    shown = { detail: "", answer: "", info: "", changes: "" };
+    shown = {};
     paint();
   };
 }
 
-// ------------------------------------------------------------ remote access
-
-async function paintRemote() {
-  $("answer").innerHTML = $("info").innerHTML = "";
-  $("changes").hidden = true;
-  let r;
-  try {
-    r = await api("/api/remote");
-  } catch (e) {
-    $("detail").innerHTML = `<div class="note error">${esc(e.message)}</div>`;
-    return;
-  }
-  if (selected !== "remote") return;
-  let html = `<div class="head"><h2>Remote</h2><div class="meta">${
-    r.origin
-      ? `Open <a href="${esc(r.origin)}" target="_blank" rel="noopener">${esc(r.origin)}</a> on a device you added, and sign in with its passkey.`
-      : "Remote access is off. Start <code class=\"cmd\">agent-diff view --remote https://…</code> behind a Cloudflare Tunnel to use this page from your phone."
-  }</div></div>`;
-  html += `<div class="actions">${mode === "local" && r.origin ? '<button class="btn primary" data-remote="pair">Add a phone</button>' : ""}${mode === "remote" ? '<button class="btn" data-remote="logout">Sign out</button>' : ""}</div><div id="pairing"></div>`;
-  html += `<div class="block"><div class="label">Devices · ${r.devices.length}</div>`;
-  html += r.devices.length
-    ? `<table class="clean"><tr><th>Device</th><th>Added</th><th>Last used</th><th></th></tr>${r.devices
-        .map((d) => `<tr><td>${esc(d.label)}${d.current ? ' <span class="sub">(this one)</span>' : ""}</td><td>${esc(when(d.createdAt))}</td><td>${esc(d.lastUsedAt ? when(d.lastUsedAt) : "")}</td><td><button class="btn small" data-remote="revoke" data-id="${esc(d.id)}">Remove</button></td></tr>`)
-        .join("")}</table>`
-    : `<p class="note">None yet.${mode === "local" && r.origin ? " Add one with the button above, or agent-diff remote pair." : ""}</p>`;
-  html += `</div><div class="block"><div class="label">Done from other devices</div>`;
-  html += r.log.length
-    ? `<ul class="list">${r.log.map((e) => `<li><span class="sub">${esc(when(e.at))}</span> <b>${esc(e.device)}</b> ${esc(e.action)}${e.target ? ` <code class="cmd">${esc(e.target)}</code>` : ""}${e.detail ? `<div class="sub">${esc(e.detail)}</div>` : ""}</li>`).join("")}</ul>`
-    : `<p class="note">Nothing yet.</p>`;
-  $("detail").innerHTML = html + "</div>";
-}
-
-$("main").addEventListener("click", async (ev) => {
+$("app").addEventListener("click", async (ev) => {
   const b = ev.target.closest("[data-remote]");
   if (!b) return;
   try {
     if (b.dataset.remote === "pair") {
       const p = await post("/api/remote/pair", {});
-      $("pairing").innerHTML = `<div class="box block pair"><div class="qr">${p.svg}</div><div><p>Scan this with the phone to add, or open the link on it. It works once, until ${esc(new Date(p.expiresAt).toLocaleTimeString())}.</p><code class="cmd">${esc(p.url)}</code> <button class="btn small" data-copy="${esc(p.url)}">Copy</button></div></div>`;
+      $("pairing").innerHTML = `<div class="pair"><div class="qr">${p.svg}</div><div><p>Scan this with the phone to add, or open the link on it. It works once, until ${esc(new Date(p.expiresAt).toLocaleTimeString())}.</p><code class="cmd">${esc(p.url)}</code> <button class="btn small" data-copy="${esc(p.url)}">Copy</button></div></div>`;
     } else if (b.dataset.remote === "revoke") {
       if (!confirm("Remove this device? Its passkey stops working here.")) return;
       await post("/api/remote/revoke", { id: b.dataset.id });
@@ -1099,7 +1617,8 @@ setInterval(() => {
   if ((token || mode === "remote") && !document.hidden) void loadInbox();
 }, 5000);
 
-if (!token && mode === "local") $("main").innerHTML = '<div class="error">Open the full URL that agent-diff printed (it carries the access token).</div>';
+if (!phone.matches) document.body.dataset.view = "session";
+if (!token && mode === "local") $("main").innerHTML = '<div class="error empty">Open the full URL that agent-diff printed (it carries the access token).</div>';
 else void loadInbox();
 </script>
 </body>

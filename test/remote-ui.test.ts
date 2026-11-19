@@ -72,7 +72,7 @@ describe("remote page", { skip: !chromium && "no browser" }, () => {
   it("lists this device under Remote, and signs out and back in with the passkey", async () => {
     await page.click("#remote");
     await page.waitForSelector("text=(this one)");
-    assert.match(await page.locator("#detail").innerText(), /Test phone \(this one\)/);
+    assert.match(await page.locator("#special").innerText(), /Test phone \(this one\)/);
     await page.click('[data-remote="logout"]');
     await page.waitForURL(`${origin}/login`);
     await page.click('[data-passkey="login"]');
