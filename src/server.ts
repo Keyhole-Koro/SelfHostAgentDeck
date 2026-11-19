@@ -1,4 +1,4 @@
-import { randomBytes } from "node:crypto";
+import { randomBytes, timingSafeEqual } from "node:crypto";
 import { mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { Worker } from "node:worker_threads";
@@ -324,6 +324,15 @@ function localToken(): string {
   mkdirSync(stateDir(), { recursive: true, mode: 0o700 });
   writeFileSync(file, t + "\n", { mode: 0o600 });
   return t;
+}
+
+/** Whether a request carries the local page's token: compared in constant time, so how long a wrong one takes tells nothing. */
+function carriesToken(req: IncomingMessage, token: string): boolean {
+  const given = req.headers["x-token"];
+  if (typeof given !== "string") return false;
+  const got = Buffer.from(given);
+  const want = Buffer.from(token);
+  return got.length === want.length && timingSafeEqual(got, want);
 }
 
 function listen(server: Server, port: number): Promise<number> {
@@ -731,7 +740,7 @@ export async function serve(opts: ServeOptions): Promise<Served> {
       }
       const asset = req.method === "GET" ? appAsset(url.pathname) : undefined;
       if (asset) return send(res, 200, asset.type, asset.body);
-      if (req.headers["x-token"] !== token) return json(res, 403, { error: "Open the URL agent-deck view printed (it carries the access token)." });
+      if (!carriesToken(req, token)) return json(res, 403, { error: "Open the URL agent-deck view printed (it carries the access token)." });
       return await api(req, res, url);
     } catch (e) {
       return json(res, e instanceof FileError ? e.status : 400, { error: (e as Error).message });
