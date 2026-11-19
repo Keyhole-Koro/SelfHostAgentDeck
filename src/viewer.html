@@ -304,12 +304,12 @@ img.shot { max-width: 100%; height: auto; border-radius: 8px; border: 1px solid 
 .review { border-left: 3px solid var(--accent); background: var(--accent-soft); border-radius: 0 8px 8px 0; padding: 10px 14px; margin-bottom: 16px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-size: 14px; }
 .plan { border-left: 3px solid var(--line); padding: 4px 0 4px 14px; margin-bottom: 16px; font-size: 14px; }
 .plan ul { margin: 6px 0 12px; padding-left: 18px; font-family: var(--mono); font-size: 13px; }
-.file { border: 1px solid var(--line); border-radius: 10px; margin-bottom: 16px; overflow: hidden; }
-.file > summary { list-style: none; cursor: pointer; padding: 8px 14px; display: flex; gap: 10px; align-items: baseline; border-bottom: 1px solid var(--line); background: var(--side); }
-.file:not([open]) > summary { border-bottom: 0; }
-.file > summary::-webkit-details-marker { display: none; }
-.file .path { font-family: var(--mono); font-size: 13px; overflow-wrap: anywhere; }
-.file .share { margin-left: auto; color: var(--muted); font-size: 12px; white-space: nowrap; }
+.diff-file { border: 1px solid var(--line); border-radius: 10px; margin-bottom: 16px; overflow: hidden; }
+.diff-file > summary { list-style: none; cursor: pointer; padding: 8px 14px; display: flex; gap: 10px; align-items: baseline; border-bottom: 1px solid var(--line); background: var(--side); }
+.diff-file:not([open]) > summary { border-bottom: 0; }
+.diff-file > summary::-webkit-details-marker { display: none; }
+.diff-file .path { font-family: var(--mono); font-size: 13px; overflow-wrap: anywhere; }
+.diff-file .share { margin-left: auto; color: var(--muted); font-size: 12px; white-space: nowrap; }
 .st { font-family: var(--mono); font-size: 12px; font-weight: 700; width: 1ch; }
 .st.A { color: var(--add-text); } .st.D { color: var(--del-text); } .st.M, .st.R { color: var(--likely); }
 .diff { overflow-x: auto; font-family: var(--mono); font-size: 12.5px; line-height: 1.55; }
@@ -1310,7 +1310,7 @@ const hunkId = (f, h) => `${f.path}\n${h.header}`;
 function paintFile(f, key) {
   const share = f.hunks.length === f.total ? hunkWord(f.total) : `${f.hunks.length} of ${hunkWord(f.total)}`;
   const mine = (key && comments[key]) || [];
-  let html = `<details class="file" open><summary><span class="st ${esc(f.status)}">${esc(f.status)}</span><span class="path">${esc(f.path)}</span><span class="share">${share}</span></summary><div class="diff">`;
+  let html = `<details class="diff-file" open><summary><span class="st ${esc(f.status)}">${esc(f.status)}</span><span class="path">${esc(f.path)}</span><span class="share">${share}</span></summary><div class="diff">`;
   if (f.shell) html += `<div class="more">Shell commands in ${f.shell.map((k) => esc(k.split(":")[1].slice(0, 8))).join(", ")} mention this file.</div>`;
   for (const h of f.hunks) {
     const id = hunkId(f, h);
@@ -1371,7 +1371,7 @@ async function paintChanges(e, fresh = false) {
   }
   const wanted = `${e.key}|${repo}|${range}`;
   shown.changes = wanted;
-  if (!box.querySelector(".file")) box.innerHTML = head(esc(base(repo))) + `<div class="note">Reading transcripts…</div>`;
+  if (!box.querySelector(".diff-file")) box.innerHTML = head(esc(base(repo))) + `<div class="note">Reading transcripts…</div>`;
   let v;
   try {
     v = await view(repo, fresh);
