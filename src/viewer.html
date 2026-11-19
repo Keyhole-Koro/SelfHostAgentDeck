@@ -1270,7 +1270,7 @@ function askHtml(i) {
   if (p) {
     if (!questions.length && p.question) questions.push(p.question);
     html += questions.map((q) => `<div class="q">${esc(q)}</div>`).join("");
-    html += `<div class="choices">${p.choices.map((c) => `<button class="choice${c.selected ? " selected" : ""}" data-key-press="${c.key}"><span class="k">${c.key}</span><span>${esc(c.label)}</span></button>`).join("")}</div>`;
+    html += `<div class="choices">${p.choices.map((c, n) => `<button class="choice${c.selected ? " selected" : ""}" data-choose="${n}" data-label="${esc(c.label)}"><span class="k">${c.key}</span><span>${esc(c.label)}</span></button>`).join("")}</div>`;
   } else {
     for (const q of i.questions || []) {
       html += `<div class="q">${esc(q.question)}</div>`;
@@ -1902,7 +1902,7 @@ function cardAsk(i) {
   const questions = (i.questions || []).map((q) => q.question);
   if (!questions.length && p && p.question) questions.push(p.question);
   html += questions.map((q) => `<div class="q">${esc(q)}</div>`).join("");
-  if (p) html += `<div class="choices">${p.choices.map((c) => `<button class="choice${c.selected ? " selected" : ""}" data-card-key="${c.key}"><span class="k">${c.key}</span><span>${esc(c.label)}</span></button>`).join("")}</div>`;
+  if (p) html += `<div class="choices">${p.choices.map((c, n) => `<button class="choice${c.selected ? " selected" : ""}" data-card-choose="${n}" data-label="${esc(c.label)}"><span class="k">${c.key}</span><span>${esc(c.label)}</span></button>`).join("")}</div>`;
   else if (i.herdr) html += `<div class="sub">Reading its screen…</div>`;
   else html += `<div class="sub">Answer it where it runs: <code class="cmd">${esc(i.resume)}</code></div>`;
   return html;
@@ -1935,7 +1935,7 @@ function cards(container, items, size = "tile") {
     if (!el) {
       el = doc.createElement("article");
       el.dataset.card = i.key;
-      el.innerHTML = `<header class="card-head"></header><div class="card-meta"></div><div class="card-body"></div><div class="card-ask"></div><div class="card-reply"><div class="card-quick"></div><form class="card-form" data-card-form><input class="card-input" aria-label="Reply to ${esc(nameOf(i))}" placeholder="${i.state === "working" ? "Queue a message" : "Reply"}" autocomplete="off"><button class="send-btn small" aria-label="Send">${icon("send", 16)}</button></form><p class="card-outside"></p><p class="card-note"></p></div>`;
+      el.innerHTML = `<header class="card-head"></header><div class="card-meta"></div><div class="card-body"></div><div class="card-ask"></div><p class="card-note"></p><div class="card-reply"><div class="card-quick"></div><form class="card-form" data-card-form><input class="card-input" aria-label="Reply to ${esc(nameOf(i))}" placeholder="${i.state === "working" ? "Queue a message" : "Reply"}" autocomplete="off"><button class="send-btn small" aria-label="Send">${icon("send", 16)}</button></form><p class="card-outside"></p></div>`;
     }
     if (el !== before) container.insertBefore(el, before);
     before = el.nextElementSibling;
@@ -1959,6 +1959,7 @@ const deck = {
   open: (key) => openFromLayout(key),
   send: (key, text) => post("/api/herdr/prompt", { key, text }),
   press: (key, k) => post("/api/herdr/keys", { key, keys: [k] }),
+  choose: (key, index, label) => post("/api/herdr/choose", { key, index, label }),
   markdown,
   esc,
 };
@@ -2044,6 +2045,8 @@ function cardClick(ev) {
   if (!card) return;
   const key = card.dataset.card;
   if (ev.target.closest("[data-card-open]")) return openFromLayout(key);
+  const ch = ev.target.closest("[data-card-choose]");
+  if (ch) return void cardAct(key, card, () => deck.choose(key, Number(ch.dataset.cardChoose), ch.dataset.label));
   const k = ev.target.closest("[data-card-key]");
   if (k) return void cardAct(key, card, () => deck.press(key, k.dataset.cardKey));
   const q = ev.target.closest("[data-card-quick]");
@@ -2349,6 +2352,23 @@ async function sendPrompt(i, text) {
   setTimeout(() => void loadChat("newer"), 1500);
 }
 
+/** Picks a choice of the dialog on its screen (the server moves to it, checks, then presses Enter). */
+async function chooseOne(el) {
+  const i = entry(selected) && entry(selected).item;
+  if (!i) return;
+  const label = el.dataset.label;
+  for (const b of document.querySelectorAll("#dock [data-choose]")) b.disabled = true;
+  setNote("answer-note", `Choosing “${label}”…`, true);
+  try {
+    await post("/api/herdr/choose", { key: i.key, index: Number(el.dataset.choose), label });
+    setNote("answer-note", `Chose “${label}”.`, true);
+  } catch (e) {
+    setNote("answer-note", e.message, false);
+    for (const b of document.querySelectorAll("#dock [data-choose]")) b.disabled = false;
+  }
+  setTimeout(() => $("screen") && act("screen"), 700); // what it asks next, if anything
+}
+
 async function pressKey(k) {
   const i = entry(selected) && entry(selected).item;
   try {
@@ -2420,6 +2440,8 @@ $("app").addEventListener("click", (ev) => {
   if (go) return void openSession(go.dataset.goto);
   const a = t.closest("[data-act]");
   if (a) return void act(a.dataset.act, a);
+  const ch = t.closest("[data-choose]");
+  if (ch) return void chooseOne(ch);
   const k = t.closest("[data-key-press]");
   if (k) return void pressKey(k.dataset.keyPress);
   const q = t.closest("[data-quick]");

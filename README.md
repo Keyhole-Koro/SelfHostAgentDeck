@@ -227,10 +227,12 @@ agent-deck unhold 4f2a9c1e
 
 When a session runs in a [herdr](https://herdr.dev) pane, the page can act on it, when you click:
 
-- **The choices it asks for, one tap each.** Claude Code's permission prompts and questions,
-  Codex's approvals, and plan approval are read off the session's screen as buttons. The keypad
-  (`↑`, `Enter`, `Esc`, `y`, `n` …) and the screen itself are folded away underneath. A plan
-  waiting for approval is shown in full.
+- **The choices it asks for, one tap each.** Claude Code's permission prompts and questions
+  (auto mode's too, which show no numbers), Codex's approvals, and plan approval are read off the
+  session's screen as buttons. A tap moves the pointer to that choice, reads the screen again to
+  see it got there, and only then presses Enter; if the choices changed in the meantime, nothing
+  is picked. The keypad (`↑`, `Enter`, `Esc`, `y`, `n` …) and the screen itself are folded away
+  underneath. A plan waiting for approval is shown in full.
 - **A reply**, with files: a photo from the phone, a log, a spec. Files go into
   `.agent-deck/uploads/` in the session's repository; a `.gitignore` inside that folder keeps
   git from seeing them, and the prompt lists their paths.

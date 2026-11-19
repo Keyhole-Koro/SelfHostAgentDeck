@@ -18,6 +18,7 @@ import { EFFORTS, startSession, type StartRequest } from "./start.ts";
 import { repoInfo } from "./git.ts";
 import { focus, herdrAgents, herdrSockets, matchPanes, prompt, screen, sendKeys, type HerdrAgent } from "./herdr.ts";
 import { moveToHerdr } from "./move.ts";
+import { choose } from "./answer.ts";
 import { applyHolds, hold, parseUntil, release, stateDir } from "./holds.ts";
 import { readInbox, transcriptOf, type Inbox, type InboxItem } from "./inbox.ts";
 import { prStatuses } from "./prs.ts";
@@ -454,7 +455,7 @@ export async function serve(opts: ServeOptions): Promise<Served> {
     const log = (action: string, target?: string, detail?: string) => {
       if (device) audit({ device: device.label, action, ...(target && { target }), ...(detail && { detail }) });
     };
-    const acting = req.method === "POST" && /^\/api\/(herdr\/(prompt|keys)|stage|start|upload|move)$/.test(url.pathname);
+    const acting = req.method === "POST" && /^\/api\/(herdr\/(prompt|keys|choose)|stage|start|upload|move)$/.test(url.pathname);
     if (device && acting && !fresh) return json(res, 403, { error: "Confirm it is you with this device's passkey.", confirm: true });
     if (req.method === "GET" && url.pathname === "/api/inbox") {
       const inbox = currentInbox();
@@ -545,6 +546,14 @@ export async function serve(opts: ServeOptions): Promise<Served> {
         if (!text || text.length > 20_000) throw new Error("Write a prompt (up to 20,000 characters).");
         log("prompt", String(b["key"]), text);
         const result = await prompt(pane, text).catch((e: Error) => failed("prompt", b["key"], e));
+        return json(res, 200, { ok: true, result });
+      }
+      if (action === "choose") {
+        const index = Number(b["index"]);
+        const label = String(b["label"] ?? "");
+        if (!Number.isInteger(index) || index < 0 || index > 8 || !label) throw new FileError("Pick one of its choices.", 400);
+        const result = await choose(pane, index, label).catch((e: Error) => failed("choose", b["key"], e));
+        log("choose", String(b["key"]), label);
         return json(res, 200, { ok: true, result });
       }
       if (action === "keys") {

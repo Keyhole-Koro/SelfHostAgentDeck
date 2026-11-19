@@ -39,7 +39,7 @@ describe("page", { skip: (!chromium && "no browser") || (process.platform !== "l
   const another = async (opts: import("playwright").BrowserContextOptions, hash = "") => {
     const p = await browser.newPage(opts);
     p.on("pageerror", (e) => errors.push(e.message));
-    p.on("console", (m) => m.type() === "error" && errors.push(m.text()));
+    p.on("console", (m) => m.type() === "error" && !/status of 409/.test(m.text()) && errors.push(m.text()));
     await p.goto(url + hash);
     await p.waitForSelector(".session");
     return p;
@@ -188,7 +188,7 @@ esac
     await context.grantPermissions(["clipboard-read", "clipboard-write"]);
     page = await context.newPage();
     page.on("pageerror", (e) => errors.push(e.message));
-    page.on("console", (m) => m.type() === "error" && errors.push(m.text()));
+    page.on("console", (m) => m.type() === "error" && !/status of 409/.test(m.text()) && errors.push(m.text()));
     await page.goto(url);
   });
 
@@ -209,8 +209,9 @@ esac
     assert.deepEqual(await page.locator("#dock .choice span:last-child").allInnerTexts(), ["Relevance", "Newest"]);
     assert.equal(await page.locator("#screen").isVisible(), false, "the raw screen is folded away");
     await shot("1-needs-answer");
-    await page.click('#dock .choice[data-key-press="1"]');
-    await until(() => herdrCalls().includes("agent send-keys w1:p1 1"));
+    await page.click('#dock .choice[data-choose="0"]');
+    await until(() => herdrCalls().includes("agent send-keys w1:p1 enter"));
+    assert.equal(herdrCalls().filter((l) => l.startsWith("agent send-keys")).length, 1, "already on it: Enter alone");
     await page.click("#dock .more-keys > summary");
     assert.match(await page.locator("#screen").innerText(), /1\. Relevance/);
   });
@@ -416,10 +417,15 @@ esac
   it("shows every session as a tile, with the choices of a question one tap away", async () => {
     await page.click('#layouts [data-layout="grid"]');
     const asker = page.locator('#layout-root .grid-tiles .card[data-card="claude:asker"]');
-    await asker.locator('.card-ask [data-card-key="2"]').waitFor();
+    await asker.locator('.card-ask [data-card-choose="1"]').waitFor();
     assert.match(await asker.locator(".card-ask").innerText(), /Which default sort\?[\s\S]*Newest/);
-    await asker.locator('.card-ask [data-card-key="2"]').click();
-    await until(() => herdrCalls().includes("agent send-keys w1:p1 2"));
+    const before = herdrCalls().length;
+    await asker.locator('.card-ask [data-card-choose="1"]').click();
+    await until(() => herdrCalls().slice(before).includes("agent send-keys w1:p1 down"));
+    // This herdr's screen never shows the pointer move: the card says so, and nothing is picked.
+    await asker.locator(".card-note.error").waitFor();
+    assert.match(await asker.locator(".card-note").innerText(), /nothing was picked/);
+    assert.ok(!herdrCalls().slice(before).includes("agent send-keys w1:p1 enter"));
     await asker.locator("[data-card-open]").click();
     await page.waitForSelector('.session[data-key="claude:asker"][aria-current="true"]');
     assert.equal(await page.locator('#layouts [data-layout="focus"]').getAttribute("aria-pressed"), "true", "a card's title opens it in Focus");

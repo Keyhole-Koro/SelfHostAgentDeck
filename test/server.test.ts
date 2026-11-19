@@ -343,6 +343,41 @@ esac
     assert.deepEqual(calls, [`${socket} agent focus w1:p9`, `${socket} agent prompt w1:p9 Ship it`, `${socket} agent send-keys w1:p4 1 enter`, `${socket} agent read w1:p4 --source visible`]);
   });
 
+  it("picks a choice by moving the pointer to it, and presses Enter only once the screen shows it there", { skip: process.platform !== "linux" && "reads /proc" }, async () => {
+    const { api, log, socket } = await setUp();
+    // A herdr whose dialog (no numbers, as in auto mode) follows the arrow keys, unless told to stick.
+    const at = join(home, "pointer");
+    const stuck = join(home, "stuck");
+    writeFileSync(at, "0");
+    writeFileSync(
+      join(home, "herdr"),
+      `#!/bin/sh
+echo "$HERDR_SOCKET_PATH $*" >> "${log}"
+case "$1 $2" in
+  "agent list") printf '%s\n' '${JSON.stringify({ result: { type: "agent_list", agents: [{ pane_id: "w1:p9", agent_status: "blocked", agent: "claude", workspace_id: "w1" }] } })}' ;;
+  "agent read") if [ "$(cat "${at}")" = 0 ]; then y="❯ Yes"; n="  No"; else y="  Yes"; n="❯ No"; fi
+    printf '{"result":{"type":"pane_read","read":{"text":" Do you want to proceed?\\\\n %s\\\\n %s\\\\n\\\\n Esc to cancel"}}}\n' "$y" "$n" ;;
+  "agent send-keys") [ -f "${stuck}" ] || case "$4" in down) echo 1 > "${at}" ;; up) echo 0 > "${at}" ;; esac
+    printf '%s\n' '{"result":{"type":"ok"}}' ;;
+  *) printf '%s\n' '{"result":{"type":"ok"}}' ;;
+esac
+`,
+    );
+    await eventually(async () => ((await api.get("/api/inbox")).items.some((i: { key: string; herdr?: object }) => i.key === "claude:sa" && i.herdr) ? true : undefined));
+    const keys = () => readFileSync(log, "utf8").split("\n").filter((l) => l.includes("send-keys"));
+
+    await assert.rejects(api.post("/api/herdr/choose", { key: "claude:sa", index: 1, label: "Yes, and don't ask again" }), /409 Its screen shows other choices now/);
+    assert.deepEqual(keys(), [], "nothing pressed for choices that are not on the screen");
+
+    assert.deepEqual((await api.post("/api/herdr/choose", { key: "claude:sa", index: 1, label: "No" })).result, { label: "No" });
+    assert.deepEqual(keys(), [`${socket} agent send-keys w1:p9 down`, `${socket} agent send-keys w1:p9 enter`]);
+
+    writeFileSync(at, "0");
+    writeFileSync(stuck, "");
+    await assert.rejects(api.post("/api/herdr/choose", { key: "claude:sa", index: 1, label: "No" }), /409 The pointer did not get to “No”, so nothing was picked/);
+    assert.deepEqual(keys().slice(2), [`${socket} agent send-keys w1:p9 down`], "no Enter when the pointer is not on it");
+  });
+
   it("moves a session waiting in another terminal into herdr, to go on with the same conversation", { skip: process.platform !== "linux" && "reads /proc" }, async () => {
     const { api, log, socket } = await setUp();
     // Claude Code in a terminal outside herdr (a process named so, with no herdr pane), and one at work.
