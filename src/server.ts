@@ -4,6 +4,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { Worker } from "node:worker_threads";
 import { join } from "node:path";
 import { renderSVG } from "uqr";
+import { appendActivity, changes, readActivity, snapshot, type ActivityEvent, type Snapshot } from "./activity.ts";
 import { ciFailure } from "./ci.ts";
 import { cleanup } from "./cleanup.ts";
 import { findConflicts } from "./conflicts.ts";
@@ -289,6 +290,29 @@ export async function serve(opts: ServeOptions): Promise<Served> {
     if (!pane) throw new Error("That session does not run in a herdr pane.");
     return pane;
   };
+  /**
+   * Watches the sessions while the page is closed too: every change goes into the activity log
+   * (and to the phones that asked to be told).
+   */
+  let seen: Snapshot | undefined;
+  const watch = () => {
+    try {
+      const inbox = currentInbox();
+      const prStatus = prStatuses(inbox.items.filter((i) => i.state !== "stale").flatMap((i) => (i.prs ?? []).map((p) => p.url)));
+      const events = changes(seen, inbox, prStatus);
+      seen = snapshot(inbox, prStatus);
+      if (events.length) {
+        appendActivity(events);
+        onEvents(events);
+      }
+    } catch {
+      // try again next time
+    }
+  };
+  const onEvents = (_events: ActivityEvent[]) => {};
+  setInterval(watch, Number(process.env["AGENT_DIFF_WATCH_MS"]) || 15_000).unref();
+  setTimeout(watch, 1000).unref();
+
   /** A session the page listed: only those can be read. */
   const listed = (key: unknown): InboxItem => {
     const item = (last ?? currentInbox()).items.find((i) => i.key === key);
@@ -337,6 +361,7 @@ export async function serve(opts: ServeOptions): Promise<Served> {
       const home = opts.root ?? null;
       return json(res, 200, { ...inbox, items, prStatus, home, homeProject: home ? placeOf(home).project : null });
     }
+    if (req.method === "GET" && url.pathname === "/api/activity") return json(res, 200, { events: readActivity(300) });
     if (req.method === "GET" && url.pathname === "/api/cleanup") {
       const inbox = last ?? currentInbox();
       const projects = new Set<string>();
