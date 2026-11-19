@@ -61,6 +61,18 @@ describe("starting a session in herdr", () => {
     assert.equal(s.dir, "/w/app-export");
   });
 
+  it("opens a session again by its id, with the same conversation, in a tab named after it", async () => {
+    const id = "4f2a9c1e-7b3d-4e8a-9c21-5d6e7f8a9b0c";
+    const s = await startSession({ dir: "/w/app", agent: "claude", prompt: "", resume: id, label: "Add due dates" });
+    const [, tab, start, ...more] = calls();
+    assert.equal(tab, "tab|create|--workspace|w7|--cwd|/w/app|--label|Add due dates|--no-focus");
+    assert.match(start!, new RegExp(`\\|--kind\\|claude\\|--pane\\|w7:p9\\|--timeout\\|60000\\|--\\|--resume\\|${id}$`));
+    assert.deepEqual(more, [], "nothing is typed into it");
+    assert.equal(s.key, `claude:${id}`, "Claude Code keeps the id it resumes");
+    assert.deepEqual(agentArgs({ agent: "codex", resume: "019a3c5e-2f1b-7d40-8e6a-b1c2d3e4f5a6", model: "x" }), ["resume", "019a3c5e-2f1b-7d40-8e6a-b1c2d3e4f5a6"]);
+    assert.throws(() => checkStart({ dir: "/w/app", agent: "claude", prompt: "", resume: "--dangerously-skip-permissions" }), /session id/);
+  });
+
   it("takes only a model name, a known effort and a branch git takes", () => {
     const ok = { dir: "/w/app", agent: "claude" as const, prompt: "x" };
     assert.throws(() => checkStart({ ...ok, model: "opus; rm -rf /" }), /model/);
