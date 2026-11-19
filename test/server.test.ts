@@ -91,6 +91,40 @@ describe("api: sessions sharing a file", () => {
   });
 });
 
+describe("api: a session's conversation and files", () => {
+  it("reads a listed session's conversation, page by page, and nobody else's", async () => {
+    const rows: object[] = [];
+    for (let i = 0; i < 40; i++) rows.push({ type: "user", message: { content: `q${i}` } }, { type: "assistant", message: { content: [{ type: "text", text: `a${i}` }] } });
+    transcript("sa", rows);
+    running("sa", process.pid);
+    const api = await serve();
+    await api.get("/api/inbox");
+    const latest = await api.get("/api/chat?key=claude:sa");
+    assert.equal(latest.messages.at(-1).text, "a39");
+    assert.ok(latest.before > 0, "there is more before");
+    const earlier = await api.get(`/api/chat?key=claude:sa&before=${latest.before}`);
+    assert.ok(Number(earlier.messages.at(-1).id) < Number(latest.messages[0].id), "the page before ends where this one starts");
+    assert.deepEqual((await api.get(`/api/chat?key=claude:sa&after=${latest.end}`)).messages, []);
+    await assert.rejects(api.get("/api/chat?key=claude:nobody"), /404/);
+  });
+
+  it("opens files in the session's repository only", async () => {
+    writeFileSync(join(repo, "notes.md"), "# Notes\n");
+    writeFileSync(join(repo, ".env"), "TOKEN=1");
+    transcript("sa", []);
+    running("sa", process.pid);
+    const api = await serve();
+    await api.get("/api/inbox");
+    const dir = await api.get("/api/files?key=claude:sa");
+    const names = dir.entries.map((e: { name: string }) => e.name);
+    assert.ok(names.includes("notes.md") && !names.includes(".env") && !names.includes(".git"), names.join(" "));
+    assert.equal((await api.get("/api/files?key=claude:sa&path=notes.md")).kind, "markdown");
+    await assert.rejects(api.get("/api/files?key=claude:sa&path=.env"), /403/);
+    await assert.rejects(api.get("/api/files?key=claude:sa&path=../"), /403/);
+    await assert.rejects(api.get("/api/files?key=claude:nobody&path=notes.md"), /404/);
+  });
+});
+
 describe("api: pull requests", () => {
   it("adds each pull request's state and CI, looked up with gh in the background", async () => {
     const gh = join(home, "gh");

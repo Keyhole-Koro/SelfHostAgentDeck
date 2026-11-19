@@ -6,11 +6,13 @@ import { join } from "node:path";
 import { renderSVG } from "uqr";
 import { cleanup } from "./cleanup.ts";
 import { findConflicts } from "./conflicts.ts";
+import { readChat } from "./conversation.ts";
 import { parseSince } from "./core.ts";
+import { FileError, filesRoot, image, look } from "./files.ts";
 import { repoInfo } from "./git.ts";
 import { focus, herdrAgents, matchPanes, prompt, screen, sendKeys, type HerdrAgent } from "./herdr.ts";
 import { applyHolds, hold, parseUntil, release, stateDir } from "./holds.ts";
-import { readInbox, type Inbox } from "./inbox.ts";
+import { readInbox, transcriptOf, type Inbox, type InboxItem } from "./inbox.ts";
 import { prStatuses } from "./prs.ts";
 import {
   audit,
@@ -173,7 +175,7 @@ function json(res: ServerResponse, status: number, value: unknown): void {
 function html(res: ServerResponse, body: string, nonce: string): void {
   res.setHeader(
     "content-security-policy",
-    `default-src 'none'; script-src 'nonce-${nonce}'; style-src 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'`,
+    `default-src 'none'; script-src 'nonce-${nonce}'; style-src 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'`,
   );
   res.setHeader("x-frame-options", "DENY");
   res.setHeader("referrer-policy", "no-referrer");
@@ -263,6 +265,16 @@ export async function serve(opts: ServeOptions): Promise<Served> {
     if (!pane) throw new Error("That session does not run in a herdr pane.");
     return pane;
   };
+  /** A session the page listed: only those can be read. */
+  const listed = (key: unknown): InboxItem => {
+    const item = (last ?? currentInbox()).items.find((i) => i.key === key);
+    if (!item) throw new FileError("That session is no longer listed.", 404);
+    return item;
+  };
+  const offset = (url: URL, name: string): number | undefined => {
+    const v = url.searchParams.get(name);
+    return v && /^\d+$/.test(v) ? Number(v) : undefined;
+  };
   const repoParam = (url: URL): string => {
     const repo = url.searchParams.get("repo") || opts.root;
     if (!repo) throw new Error("No repository given.");
@@ -333,6 +345,22 @@ export async function serve(opts: ServeOptions): Promise<Served> {
       }
       return json(res, 404, { error: "Not found" });
     }
+    if (req.method === "GET" && url.pathname === "/api/chat") {
+      const item = listed(url.searchParams.get("key"));
+      const file = transcriptOf(item);
+      if (!file) return json(res, 404, { error: "Its transcript was not found." });
+      return json(res, 200, readChat(file, item.agent, { before: offset(url, "before"), after: offset(url, "after"), ...(item.cwd && { cwd: item.cwd }) }));
+    }
+    if (req.method === "GET" && (url.pathname === "/api/files" || url.pathname === "/api/files/image")) {
+      const item = listed(url.searchParams.get("key"));
+      const root = filesRoot(item.cwd, placeOf(item.cwd).repo);
+      if (!root) return json(res, 403, { error: "Files are not shown for a session that runs in your home folder." });
+      const path = url.searchParams.get("path") ?? "";
+      if (url.pathname === "/api/files") return json(res, 200, look(root, item.cwd ?? root, path));
+      const img = image(root, item.cwd ?? root, path);
+      res.writeHead(200, { "content-type": img.type, "cache-control": "no-store", "x-content-type-options": "nosniff", "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; sandbox" });
+      return void res.end(img.data);
+    }
     if (req.method === "GET" && url.pathname === "/api/view") {
       // Started outside a repository and no session picked: there are no changes to show.
       if (!opts.root && !url.searchParams.get("repo")) return json(res, 200, { root: null });
@@ -379,7 +407,7 @@ export async function serve(opts: ServeOptions): Promise<Served> {
       if (req.headers["x-token"] !== token) return json(res, 403, { error: "Open the URL agent-diff view printed (it carries the access token)." });
       return await api(req, res, url);
     } catch (e) {
-      return json(res, 400, { error: (e as Error).message });
+      return json(res, e instanceof FileError ? e.status : 400, { error: (e as Error).message });
     }
   });
   const port = await listen(local, opts.port);
@@ -447,7 +475,7 @@ export async function serve(opts: ServeOptions): Promise<Served> {
       }
       return json(res, 404, { error: "Not found" });
     } catch (e) {
-      return json(res, 400, { error: (e as Error).message });
+      return json(res, e instanceof FileError ? e.status : 400, { error: (e as Error).message });
     }
   });
   served.remote = { origin: cfg.origin, port: await listen(remote, opts.remote.port) };
