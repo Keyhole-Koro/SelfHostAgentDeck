@@ -500,6 +500,8 @@ interface ClaudeAcc {
   /** Publish calls waiting for the URL their result tells, and the pages published. */
   publishing: Map<string, { title?: string }>;
   pages: Map<string, InboxPage>;
+  /** The last turn has ended (and nothing came after it). */
+  turnOver?: boolean;
 }
 
 const claudeCursors = new Map<string, Cursor<ClaudeAcc>>();
@@ -601,6 +603,7 @@ function feedClaude(acc: ClaudeAcc, raw: string): void {
       if (typeof line.content === "string" && line.content.includes("<task-notification>")) finishTasks(acc, line.content);
       return;
     case "system":
+      if (line.subtype === "turn_duration" || line.subtype === "stop_hook_summary") acc.turnOver = true;
       if (line.subtype === "away_summary" && typeof line.content === "string") acc.awaySummary = line.content.trim();
       if (line.subtype === "compact_boundary") {
         acc.compactions++;
@@ -609,6 +612,7 @@ function feedClaude(acc: ClaudeAcc, raw: string): void {
       }
       return;
     case "user": {
+      acc.turnOver = false;
       const content = line.message?.content;
       const text = typeof content === "string" ? content : "";
       if (text.includes("<task-notification>")) finishTasks(acc, text);
@@ -642,6 +646,7 @@ function feedClaude(acc: ClaudeAcc, raw: string): void {
       return;
     }
     case "assistant": {
+      acc.turnOver = false;
       const content = line.message?.content;
       if (!Array.isArray(content)) return;
       for (const b of content as Block[]) {
@@ -712,6 +717,19 @@ function questionsOf(block: Block): InboxQuestion[] {
 }
 
 /** Adds what the transcript says to an item. */
+/**
+ * Claude Code can go on saying "waiting" after its question was answered, while a background
+ * command it started runs on; until a turn ends with none running. If its transcript shows the
+ * turn over and nothing asked, it waits on no one. Permission prompts name what they want
+ * ("approve Bash: …") and are left as they are.
+ */
+function notAsking(item: InboxItem, r: ClaudeRecord, acc: ClaudeAcc): void {
+  if (item.state !== "needs-answer" || (r.waitingFor && r.waitingFor !== "input needed") || !acc.turnOver || acc.pending.size) return;
+  delete item.reason;
+  if (acc.background.size) ((item.state = "working"), (item.reason = "background command"));
+  else item.state = "your-turn";
+}
+
 function fromTranscript(item: InboxItem, acc: ClaudeAcc): void {
   setEdited(item, acc.edited);
   if (acc.title) item.title = acc.title;
@@ -813,7 +831,10 @@ function claudeItems(home: string, now: number, staleAfter: number, light: boole
     placeProcess(item, pid);
     if (!light && transcript) {
       const acc = follow(claudeCursors, transcript, newClaudeAcc, feedClaude);
-      if (acc) fromTranscript(item, acc);
+      if (acc) {
+        notAsking(item, r, acc);
+        fromTranscript(item, acc);
+      }
     } else if (transcript) {
       const title = quickTitle(transcript);
       if (title) item.title = title;

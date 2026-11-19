@@ -202,6 +202,26 @@ describe("inbox: what a Claude transcript adds", () => {
     assert.deepEqual(inbox().items[0]?.questions, [{ question: "Which one?", options: ["A", "B"] }]);
   });
 
+  it("does not take an answered question for one, when Claude Code still says it waits", () => {
+    const asked = [prompt("Ship it?"), tool("q1", "AskUserQuestion", { questions: [{ question: "Where to?", options: [{ label: "prod" }] }] }), result("q1"), tool("b1", "Bash", { command: "deploy", run_in_background: true })];
+    const started = { type: "user", message: { content: [{ type: "tool_result", tool_use_id: "b1", content: "Command running in background with ID: bg1. Output is being written to: /tmp/x" }] }, toolUseResult: { backgroundTaskId: "bg1" } };
+    const ended = [say("Deploying."), { type: "system", subtype: "stop_hook_summary" }, { type: "system", subtype: "turn_duration" }];
+    transcript("s1", [...asked, started, ...ended]);
+    running("s1", { status: "waiting", waitingFor: "input needed" });
+    const item = byKey(inbox().items)["claude:s1"]!;
+    assert.equal(item.state, "working", "the deploy runs on");
+    assert.equal(item.reason, "background command");
+
+    transcript("s1", [...asked, result("b1"), ...ended]);
+    assert.equal(byKey(inbox().items)["claude:s1"]!.state, "your-turn", "nothing runs, nothing asked");
+
+    transcript("s1", [prompt("Ship it?"), tool("q1", "AskUserQuestion", { questions: [{ question: "Where to?", options: [{ label: "prod" }] }] })]);
+    assert.equal(byKey(inbox().items)["claude:s1"]!.state, "needs-answer", "a question still open");
+    transcript("s1", [...asked, result("b1"), ...ended, tool("p1", "Bash", { command: "rm -rf build" })]);
+    running("s1", { status: "waiting", waitingFor: "approve Bash: rm -rf build" });
+    assert.equal(byKey(inbox().items)["claude:s1"]!.state, "needs-answer", "a permission prompt");
+  });
+
   it("shows the plan a waiting session asks you to approve, and the model it answers with", () => {
     transcript("s1", [
       { type: "assistant", message: { model: "claude-opus-5-5", content: [{ type: "text", text: "Here is my plan." }] } },
