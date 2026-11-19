@@ -366,7 +366,7 @@ echo "$HERDR_SOCKET_PATH $*" >> "${log}"
 case "$1 $2" in
   "agent list") printf '%s\n' '${JSON.stringify({ result: { type: "agent_list", agents: [{ pane_id: "w1:p9", agent_status: "blocked", agent: "claude", workspace_id: "w1" }] } })}' ;;
   "agent read") if [ "$(cat "${at}")" = 0 ]; then y="❯ Yes"; n="  No"; else y="  Yes"; n="❯ No"; fi
-    printf '{"result":{"type":"pane_read","read":{"text":"   %s\\\\n\\\\n Do you want to proceed?\\\\n %s\\\\n %s\\\\n\\\\n Esc to cancel"}}}\n' "$(cat "${cmd}")" "$y" "$n" ;;
+    printf '   %s\\n\\n Do you want to proceed?\\n %s\\n %s\\n\\n Esc to cancel\\n' "$(cat "${cmd}")" "$y" "$n" ;; # as herdr 0.8 prints it: the screen, not JSON
   "agent send-keys") [ -f "${stuck}" ] || case "$4" in down) echo 1 > "${at}" ;; up) echo 0 > "${at}" ;; esac
     printf '%s\n' '{"result":{"type":"ok"}}' ;;
   *) printf '%s\n' '{"result":{"type":"ok"}}' ;;
@@ -439,6 +439,32 @@ esac
     await assert.rejects(api.post("/api/herdr/focus", { key: "claude:sa" }), /does not run in a herdr pane/);
     await assert.rejects(api.post("/api/start", { dir: repo, agent: "claude", prompt: "x" }), /herdr is off/);
     assert.equal(existsSync(log), false, "herdr was never run");
+  });
+});
+
+describe("herdr: its replies", () => {
+  it("takes the screen as herdr prints it, and its errors from stderr", async () => {
+    const { herdr, screen } = await import("../src/herdr.ts");
+    const fake = join(home, "herdr-replies");
+    writeFileSync(fake, `#!/bin/sh
+case "$3" in
+  w1:p1) printf '{ not json\\n❯ Yes\\n' ;;
+  w1:p2) printf '%s\\n' '{"result":{"read":{"text":"older herdr"}}}' ;;
+  *) echo '{"error":{"code":"agent_not_found","message":"agent target $3 not found"}}' >&2; exit 1 ;;
+esac
+`);
+    chmodSync(fake, 0o755);
+    const was = process.env["AGENT_DECK_HERDR"];
+    process.env["AGENT_DECK_HERDR"] = fake;
+    try {
+      assert.equal(await screen({ pane: "w1:p1", socket: "s", status: "idle" }), "{ not json\n❯ Yes\n");
+      assert.equal(await screen({ pane: "w1:p2", socket: "s", status: "idle" }), "older herdr");
+      await assert.rejects(screen({ pane: "w1:p9", socket: "s", status: "idle" }), (e: Error & { code?: string }) => e.code === "agent_not_found");
+      await assert.rejects(herdr("s", ["agent", "prompt", "w1:p9", "hi"]), (e: Error & { code?: string }) => e.code === "agent_not_found");
+    } finally {
+      if (was === undefined) delete process.env["AGENT_DECK_HERDR"];
+      else process.env["AGENT_DECK_HERDR"] = was;
+    }
   });
 });
 

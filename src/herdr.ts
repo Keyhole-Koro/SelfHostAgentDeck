@@ -45,19 +45,29 @@ interface AgentInfo {
 
 const bin = () => env("HERDR") || "herdr";
 
-/** Runs a herdr command against one herdr session; resolves to its `result`. */
-export function herdr(socket: string, args: string[], timeout = 8000): Promise<Record<string, unknown>> {
+/**
+ * Runs a herdr command against one herdr session; resolves to its `result`. herdr answers in JSON,
+ * its errors in JSON on stderr; `agent read` prints the screen as it is (older herdr wrapped it in
+ * JSON too), which `text` takes as `{ text }`.
+ */
+export function herdr(socket: string, args: string[], timeout = 8000, text = false): Promise<Record<string, unknown>> {
+  type Reply = { result?: Record<string, unknown>; error?: { code?: string; message?: string } };
+  const reply = (s: string): Reply | undefined => {
+    try {
+      const o = JSON.parse(s) as unknown;
+      return o && typeof o === "object" && ("result" in o || "error" in o) ? (o as Reply) : undefined;
+    } catch {
+      return undefined;
+    }
+  };
   return new Promise((resolve, reject) => {
-    execFile(bin(), args, { env: { ...process.env, HERDR_SOCKET_PATH: socket }, timeout, maxBuffer: 4 * 1024 * 1024 }, (err, stdout) => {
-      let out: { result?: Record<string, unknown>; error?: { code?: string; message?: string } } | undefined;
-      try {
-        out = JSON.parse(stdout) as typeof out;
-      } catch {
-        return reject(err ?? new Error("herdr printed no JSON"));
-      }
+    execFile(bin(), args, { env: { ...process.env, HERDR_SOCKET_PATH: socket }, timeout, maxBuffer: 4 * 1024 * 1024 }, (err, stdout, stderr) => {
+      const out = reply(stdout) ?? reply(stderr);
       if (out?.error) return reject(Object.assign(new Error(out.error.message || out.error.code || "herdr error"), { code: out.error.code }));
       if (err) return reject(err);
-      resolve(out?.result ?? {});
+      if (out) return resolve(out.result ?? {});
+      if (text) return resolve({ text: stdout });
+      reject(new Error("herdr printed no JSON"));
     });
   });
 }
@@ -161,6 +171,6 @@ export function sendKeys(a: HerdrAgent, keys: string[]): Promise<Record<string, 
   return herdr(a.socket, ["agent", "send-keys", a.pane, ...keys]);
 }
 export async function screen(a: HerdrAgent): Promise<string> {
-  const r = await herdr(a.socket, ["agent", "read", a.pane, "--source", "visible"]);
-  return String((r["read"] as { text?: string } | undefined)?.text ?? "");
+  const r = await herdr(a.socket, ["agent", "read", a.pane, "--source", "visible"], 8000, true);
+  return String((r["read"] as { text?: string } | undefined)?.text ?? r["text"] ?? "");
 }
