@@ -16,7 +16,10 @@ notification when one needs you, start new ones, and stage exactly one session's
   title, your last prompt, Claude Code's recap, tasks, background commands, pull requests with
   their CI, context use, and the pages it published.
 - **The conversation.** Read back what you and the session said, a page at a time. Markdown is
-  rendered, and tool calls fold into one line per run.
+  rendered, tool calls fold into one line per run, and images (yours, and screenshots its tools
+  took) show as thumbnails.
+- **Search.** Find what you or an agent said in any session of the last 30 days, running or
+  closed, and jump to that message.
 - **One tap to answer.** A permission prompt's or a question's choices become buttons, read off
   the session's screen. A working session gets **Stop**, and one waiting for your turn gets
   one-tap replies. You can send files with a prompt, or switch a session's model and effort.
@@ -27,7 +30,7 @@ notification when one needs you, start new ones, and stage exactly one session's
 - **From your phone, signed in with a passkey**, at a host name of yours through a Cloudflare
   Tunnel. To act, the device must have checked its passkey in the last five minutes.
 - **Notifications** on your phone or desktop, even with the page closed: when a session asks you
-  something, finishes its turn, or its CI fails.
+  something, finishes its turn, or its CI fails. A permission prompt's carries Yes and No.
 - **New sessions.** Start Claude Code or Codex in a folder, or in a new worktree, with a model,
   an effort level, a first message, and files.
 - **Files.** Browse a session's repository, read-only: Markdown, code, and images.
@@ -149,7 +152,7 @@ left changes in this repository. Idle ones are folded away. Picking a session sh
 
 | Tab | Shows |
 |---|---|
-| Conversation | What you and the session said, newest at the bottom; scroll up for earlier pages. Tool calls fold into one line per run: open it to see each step. The last run shows its latest step. Recaps, compactions and interruptions appear where they happened. What the session asks, and the reply box, stay at the bottom |
+| Conversation | What you and the session said, newest at the bottom; scroll up for earlier pages. Tool calls fold into one line per run: open it to see each step. The last run shows its latest step. Images show as thumbnails (yours in your message, what its tools saw under their steps); a tap shows one large. Recaps, compactions and interruptions appear where they happened. What the session asks, and the reply box, stay at the bottom |
 | Changes | The hunks it made in its working tree, each with how sure the attribution is |
 | Files | Its repository, read-only: folders, Markdown rendered, code with line numbers, images. Paths in the conversation open here |
 | Details | Its tasks, background commands, pull requests (and why CI failed), the pages it published, its context, and how to resume it |
@@ -233,7 +236,8 @@ When a session runs in a [herdr](https://herdr.dev) pane, the page can act on it
   see it got there, and only then presses Enter; if the choices changed in the meantime, nothing
   is picked. The keypad (`↑`, `Enter`, `Esc`, `y`, `n` …) and the screen itself are folded away
   underneath. A plan waiting for approval is shown in full.
-- **A reply**, with files: a photo from the phone, a log, a spec. Files go into
+- **A reply**, with files: a photo from the phone, a log, a spec; on a computer, paste a
+  screenshot into the reply box or drop files on it. Files go into
   `.agent-deck/uploads/` in the session's repository; a `.gitignore` inside that folder keeps
   git from seeing them, and the prompt lists their paths.
 - **One-tap replies**, if you add some (the sliders in the reply box): a tap sends one at once.
@@ -270,12 +274,25 @@ session id from Agent Deck, so the page opens the new session as soon as it show
 asks you something, finishes its turn, or its CI fails. They come even with the page closed, as
 long as the server runs. A tap opens the session.
 
+A permission prompt's notification carries its **Yes** and **No** (where the browser shows
+buttons on notifications: Android, desktops; not iOS). A tap on one opens the page, which answers
+with it, after the passkey check another device needs to act, so a locked phone approves
+nothing. If the prompt on the screen changed meanwhile, nothing is picked.
+
 - **iPhone and iPad** only deliver them to the app added to the home screen. In Safari, tap Share,
   then Add to Home Screen; open Agent Deck from there, and tap **Notify**.
 - **Privacy.** The text (the session's name, and what it asks) travels through your browser's
   push service (Apple's, Google's or Mozilla's). It is encrypted so that only your device can read
   it ([RFC 8291](https://www.rfc-editor.org/rfc/rfc8291)), and the server signs its requests with
   its own key ([VAPID](https://www.rfc-editor.org/rfc/rfc8292)).
+
+### Search
+
+**Search** (the magnifier, or `Ctrl`/`⌘`+`K`) finds the messages, yours and the agents', holding
+every word you type, in every Claude Code and Codex session of the last 30 days, running or
+closed. A hit in a listed session opens its conversation at that message; a closed one shows the
+command to open it again. The server keeps only the conversations' text in memory (tool output
+and images are left out), reads it once soon after it starts, and then only what was added.
 
 ### Activity
 
