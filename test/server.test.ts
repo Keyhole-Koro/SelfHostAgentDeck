@@ -135,6 +135,55 @@ describe("api: a session's conversation and files", () => {
   });
 });
 
+describe("api: shell commands", () => {
+  /** Runs a command through the page's API: the lines it streams back, parsed. */
+  const run = async (api: Awaited<ReturnType<typeof serve>>, key: string, command: string, signal?: AbortSignal) => {
+    const res = await api.send!("/api/command", { method: "POST", body: JSON.stringify({ key, command }), ...(signal && { signal }) });
+    if (!res.ok) return { status: res.status, error: ((await res.json()) as { error: string }).error, lines: [] as any[] };
+    const lines = (await res.text()).split("\n").filter(Boolean).map((l) => JSON.parse(l));
+    return { status: res.status, lines, out: lines.map((l) => l.o ?? "").join(""), done: lines.at(-1) };
+  };
+
+  it("runs a command in the session's folder and streams what it prints, both streams, without colors", async () => {
+    transcript("sa", []);
+    running("sa", process.pid);
+    const api = await serve();
+    await api.get("/api/inbox");
+    const r = await run(api, "claude:sa", "pwd; echo out; echo err >&2; printf '\\033[31mred\\033[0m\\n'; exit 3");
+    assert.equal(r.status, 200);
+    assert.equal(r.out, `${repo}\nout\nerr\nred\n`);
+    assert.equal(r.done.done, true);
+    assert.equal(r.done.code, 3);
+    assert.equal(r.lines[0].cwd, repo);
+    assert.match((await run(api, "claude:sa", "read x; echo got:$x")).out!, /^got:$/m, "nothing to read: an end of input at once");
+  });
+
+  it("runs only in listed sessions' folders, and checks what it is given", async () => {
+    transcript("sa", []);
+    running("sa", process.pid);
+    const api = await serve();
+    await api.get("/api/inbox");
+    assert.equal((await run(api, "claude:nobody", "echo hi")).status, 404);
+    assert.equal((await run(api, "claude:sa", "   ")).status, 400);
+    assert.equal((await run(api, "claude:sa", "x".repeat(5000))).status, 400);
+  });
+
+  it("stops the command, and what it started, when the page stops waiting", async () => {
+    transcript("sa", []);
+    running("sa", process.pid);
+    const api = await serve();
+    await api.get("/api/inbox");
+    const mark = join(repo, "still-running");
+    const stop = new AbortController();
+    const res = await api.send!("/api/command", { method: "POST", body: JSON.stringify({ key: "claude:sa", command: `(sleep 1.5; touch ${mark}) & sleep 30` }), signal: stop.signal });
+    const reader = res.body!.getReader();
+    await reader.read(); // started
+    stop.abort();
+    await new Promise((r) => setTimeout(r, 2500));
+    assert.equal(existsSync(mark), false, "the whole group was stopped");
+  });
+});
+
 describe("api: an app with notifications", () => {
   it("serves the manifest, the worker and the icons without the token", async () => {
     const api = await serve();

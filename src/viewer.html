@@ -199,7 +199,7 @@ kbd { font-family: var(--mono); font-size: 11px; border: 1px solid var(--line); 
 .tabs-row { flex: none; display: flex; align-items: flex-end; gap: 16px; padding: 0 16px 0 20px; border-bottom: 1px solid var(--line); min-width: 0; }
 .tab-meta { margin-left: auto; min-width: 0; display: flex; gap: 12px; padding-bottom: 10px; font-size: 12px; color: var(--faint); white-space: nowrap; overflow: hidden; }
 .tab-meta .agent { font-size: 12px; }
-.tabs { flex: none; display: flex; gap: 2px; overflow-x: auto; scrollbar-width: none; }
+.tabs { flex: 0 1 auto; min-width: 0; display: flex; gap: 2px; overflow-x: auto; scrollbar-width: none; }
 .tabs button { border: 0; background: none; padding: 8px 10px 9px; font-size: 14px; color: var(--muted); cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px; white-space: nowrap; }
 .tabs button:hover { color: var(--text); }
 .tabs button[aria-selected="true"] { color: var(--text); font-weight: 600; border-bottom-color: var(--accent); }
@@ -322,6 +322,20 @@ button.opt:hover { border-color: var(--accent); color: var(--accent); }
 .note.ok { color: var(--ok); }
 .note.error, .error { color: var(--del-text); }
 .empty { color: var(--muted); padding: 48px 0; text-align: center; }
+/* The Shell tab: commands run in the session's folder, each with its output. */
+.run { margin: 0 0 18px; }
+.run-cmd { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 8px; }
+.run-cmd .sign { color: var(--faint); font-family: var(--mono); font-size: 13px; }
+.run-cmd code { flex: 1 1 12em; min-width: 0; font-size: 13px; font-weight: 600; white-space: pre-wrap; word-break: break-all; cursor: pointer; }
+.run-cmd code:hover { color: var(--accent); }
+.run-state { color: var(--muted); font-size: 12px; white-space: nowrap; }
+.run-state.bad { color: var(--urgent); }
+.run-out { margin: 6px 0 0; padding: 10px 12px; background: var(--code-bg); border-radius: 8px; font-size: 12.5px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
+.run .note { margin: 6px 0 0; }
+.shell-form .shell-sign { align-self: center; padding: 0 2px 0 8px; color: var(--faint); font-family: var(--mono); }
+.shell-form textarea { font-family: var(--mono); font-size: 14px; }
+.shell-where { margin: 6px 6px 0; font-size: 12px; color: var(--faint); overflow-wrap: anywhere; }
+.shell-where code { color: var(--muted); }
 
 /* ---------------------------------------------------------------- buttons */
 .btn { border: 1px solid var(--line); background: transparent; border-radius: 8px; padding: 4px 12px; cursor: pointer; font-size: 14px; white-space: nowrap; }
@@ -547,7 +561,8 @@ body.pip { height: auto; min-height: 100vh; overflow: auto; display: block; }
   .meta .path { display: none; }
   .actions { margin-top: 8px; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; padding-bottom: 2px; }
   .actions .btn { padding: 3px 11px; font-size: 13px; }
-  .tabs-row { padding: 0 10px; }
+  .tabs-row { padding: 0 6px; }
+  .tabs button { padding: 8px 8px 9px; }
   .col { padding: 14px 16px 32px; }
   .dock .col { padding: 8px 12px calc(10px + env(safe-area-inset-bottom)); }
   .bubble { max-width: 88%; }
@@ -616,6 +631,13 @@ systemDark.addEventListener("change", applyTheme);
     </section>
     <section class="pane scroll" id="pane-changes" hidden><div class="col wide"><section id="changes" class="changes"></section></div></section>
     <section class="pane scroll" id="pane-files" hidden><div class="col wide" id="files"></div></section>
+    <section class="pane" id="pane-shell" hidden>
+      <div class="chat" id="shell-scroll"><div class="col" id="shell-log"></div></div>
+      <div class="dock"><div class="col">
+        <form class="composer shell-form" id="shell-form"><span class="shell-sign" aria-hidden="true">$</span><textarea id="shell-cmd" rows="1" aria-label="Shell command" placeholder="A command, run in its folder" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" enterkeyhint="go"></textarea><button class="send-btn" id="shell-run" title="Run (Enter)" aria-label="Run" data-icon="send"></button></form>
+        <p class="shell-where" id="shell-where"></p>
+      </div></div>
+    </section>
     <section class="pane scroll" id="pane-details" hidden></section>
     <section class="pane scroll" id="pane-special" hidden><div class="col" id="special"></div></section>
   </main>
@@ -678,7 +700,7 @@ const attached = new Map(); // session → files sent for its next prompt: [{ na
 const ciLogs = new Map(); // pull request → why its CI failed: { loading } | { error } | { checks, log }
 /** The failing log, as a request the session can act on. */
 const ciText = (url, r) => `CI failed on ${url}${r.checks.length ? ` (${r.checks.map((c) => c.name).join(", ")})` : ""}. The end of the failing log:\n\n\`\`\`\n${r.log}\n\`\`\`\n\nFind the cause and fix it.`;
-const TABS = ["chat", "changes", "files", "details"];
+const TABS = ["chat", "changes", "files", "shell", "details"];
 /** Phones show the list or a session; wide screens show the details beside the conversation. */
 const phone = matchMedia("(max-width: 699px)");
 const wide = matchMedia("(min-width: 1280px)");
@@ -1210,7 +1232,7 @@ function paintHead(e) {
 
 function paintTabs(e) {
   const changes = e && e.item && e.item.conflicts && e.item.conflicts.length ? `<span class="n">⚠</span>` : "";
-  const list = [["chat", "Conversation"], ["changes", "Changes" + changes], ["files", "Files"]];
+  const list = [["chat", "Conversation"], ["changes", "Changes" + changes], ["files", "Files"], ["shell", "Shell"]];
   if (!wide.matches) list.push(["details", "Details"]);
   const html = list.map(([k, label]) => `<button role="tab" data-tab="${k}" aria-selected="${tab === k}">${label}</button>`).join("");
   if (html !== shown.tabs) $("tabs").innerHTML = shown.tabs = html;
@@ -2489,6 +2511,7 @@ function paint() {
     if ($("prompt") && !$("prompt").style.height) grow($("prompt"));
   } else if (tab === "changes") syncChanges(e);
   else if (tab === "files") syncFiles(e);
+  else if (tab === "shell") syncShell(e);
 }
 
 function select(key) {
@@ -2778,6 +2801,193 @@ document.addEventListener("keydown", (ev) => {
   select(keys[Math.min(keys.length - 1, Math.max(0, keys.indexOf(selected) + step))]);
   const cur = $("nav").querySelector('.session[aria-current="true"]');
   if (cur) cur.scrollIntoView({ block: "nearest" });
+});
+
+// ------------------------------------------------------------ shell
+
+/**
+ * The Shell tab: a command typed here runs in the session's folder by your login shell, as in a
+ * terminal there, not through the agent. What it prints shows while it runs. The commands of each
+ * session stay while the page is open; the ones you typed are kept for ↑ and ↓.
+ */
+const runs = new Map(); // session → [{ id, command, out, state: "running" | "done" | "failed", code, signal, ms, cut, timedOut, stopped, error, ctrl, started }]
+let runIds = 0;
+let shellHistory = stored("shell-history", []);
+let historyAt = -1;
+/** The end of a long output is what matters, and a phone shows a few hundred kilobytes slowly. */
+const SHOW_OUTPUT = 200_000;
+
+function syncShell(e) {
+  const i = e && e.item;
+  const can = !!(i && i.cwd);
+  $("shell-form").hidden = !can;
+  const where = can ? `Runs in <code>${esc(i.cwd)}</code>, as in a terminal there; the agent does not see it.${(runs.get(i.key) || []).some((r) => r.state !== "running") ? ` <button class="linkish" data-clear-runs>Clear</button>` : ""}` : "";
+  if (shown.shellWhere !== where) $("shell-where").innerHTML = shown.shellWhere = where;
+  const key = i ? i.key : "";
+  if (shown.shell !== key) {
+    shown.shell = key;
+    paintRuns();
+  }
+}
+
+function paintRuns() {
+  const e = entry(selected);
+  const i = e && e.item;
+  const list = i ? runs.get(i.key) || [] : [];
+  $("shell-log").innerHTML = !i || !i.cwd
+    ? `<div class="empty">Shell commands run in the folder of a running session.</div>`
+    : list.length
+      ? list.map(runHtml).join("")
+      : `<div class="empty">A command typed below runs in this session's folder, and what it prints shows here.<br>Nothing of it goes to the agent.</div>`;
+  $("shell-scroll").scrollTop = $("shell-scroll").scrollHeight;
+}
+
+/** What a terminal would show: a line rewritten with \r (a progress bar) shows its last state. */
+function terminalText(out) {
+  const text = out.length > SHOW_OUTPUT ? out.slice(-SHOW_OUTPUT) : out;
+  return text.split("\n").map((l) => l.replace(/\r+$/, "").split("\r").pop()).join("\n").replace(/\n$/, "");
+}
+
+function runHtml(r) {
+  const secs = (ms) => (ms < 1000 ? `${ms} ms` : ms < 60_000 ? `${(ms / 1000).toFixed(1)} s` : `${Math.floor(ms / 60_000)} min ${Math.round((ms % 60_000) / 1000)} s`);
+  const state =
+    r.state === "running"
+      ? `<span class="run-state">running…</span><button class="btn small" data-stop-run="${r.id}">Stop</button>`
+      : r.state === "failed"
+        ? `<span class="run-state bad">not run</span>`
+        : r.stopped
+          ? `<span class="run-state bad">stopped · ${secs(r.ms)}</span>`
+          : r.timedOut
+            ? `<span class="run-state bad">stopped after ${secs(r.ms)}: too long</span>`
+            : r.code === 0
+              ? `<span class="run-state">done · ${secs(r.ms)}</span>`
+              : `<span class="run-state bad">${r.code === null ? `ended by ${esc(r.signal || "a signal")}` : `exit ${r.code}`} · ${secs(r.ms)}</span>`;
+  const notes = [r.error && `<p class="note error">${esc(r.error)}</p>`, r.out.length > SHOW_OUTPUT && `<p class="note">Only its last ${Math.round(SHOW_OUTPUT / 1000)} KB are shown.</p>`, r.cut && `<p class="note">It printed more than 2 MB; the rest is not shown.</p>`].filter(Boolean).join("");
+  const out = terminalText(r.out);
+  return `<div class="run" data-run="${r.id}"><div class="run-cmd"><span class="sign">$</span><code data-reuse="${r.id}" title="Put it in the box again">${esc(r.command)}</code>${state}</div>${out ? `<pre class="run-out">${esc(out)}</pre>` : ""}${notes}</div>`;
+}
+
+/** Repaints one command, once a frame at most, keeping the view at the end if it was there. */
+function updateRun(key, r) {
+  if (r.painting) return;
+  r.painting = true;
+  requestAnimationFrame(() => {
+    r.painting = false;
+    if (shown.shell !== key) return; // another session's commands on show: painted when it is back
+    const el = $("shell-log").querySelector(`[data-run="${r.id}"]`);
+    if (!el) return;
+    const sc = $("shell-scroll");
+    const atEnd = sc.scrollHeight - sc.scrollTop - sc.clientHeight < 40;
+    el.outerHTML = runHtml(r);
+    if (atEnd) sc.scrollTop = sc.scrollHeight;
+    if (tab === "shell") syncShell(entry(selected));
+  });
+}
+
+async function runShell(i, command) {
+  const r = { id: ++runIds, command, out: "", state: "running", started: Date.now(), ctrl: new AbortController() };
+  const list = runs.get(i.key) || [];
+  list.push(r);
+  if (list.length > 50) list.shift();
+  runs.set(i.key, list);
+  shellHistory = [command, ...shellHistory.filter((c) => c !== command)].slice(0, 50);
+  store("shell-history", shellHistory);
+  paintRuns();
+  syncShell(entry(selected));
+  const send = () => fetch("/api/command", { method: "POST", headers: headers(), credentials: "same-origin", body: JSON.stringify({ key: i.key, command }), signal: r.ctrl.signal });
+  try {
+    let res = await send();
+    if (res.status === 401 && mode === "remote") {
+      location.assign("/login");
+      throw new Error("Signing in again…");
+    }
+    if (res.status === 403) {
+      const b = await res.json().catch(() => ({}));
+      if (!b.confirm) throw new Error(b.error || res.statusText);
+      // Acting from another device: check its passkey, then run it.
+      await confirmIdentity();
+      res = await send();
+    }
+    if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || res.statusText);
+    const reader = res.body.getReader();
+    const dec = new TextDecoder();
+    let buf = "";
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      for (let n; (n = buf.indexOf("\n")) >= 0; ) {
+        const line = buf.slice(0, n);
+        buf = buf.slice(n + 1);
+        if (!line) continue;
+        const m = JSON.parse(line);
+        if (m.o) r.out += m.o;
+        if (m.done) Object.assign(r, { state: "done", code: m.code, signal: m.signal, ms: m.ms, cut: m.cut, timedOut: m.timedOut, error: m.error });
+      }
+      updateRun(i.key, r);
+    }
+    if (r.state === "running") throw new Error("The connection closed before it ended; it was stopped.");
+  } catch (err) {
+    if (r.stopped) Object.assign(r, { state: "done", ms: Date.now() - r.started });
+    else Object.assign(r, { state: r.out ? "done" : "failed", error: err.message, ms: Date.now() - r.started, code: r.code ?? null });
+  }
+  updateRun(i.key, r);
+}
+
+function submitShell() {
+  const i = entry(selected) && entry(selected).item;
+  const box = $("shell-cmd");
+  const command = box.value.trim();
+  if (!i || !i.cwd || !command) return;
+  box.value = "";
+  box.style.height = "";
+  historyAt = -1;
+  void runShell(i, command);
+}
+
+$("shell-form").addEventListener("submit", (ev) => {
+  ev.preventDefault();
+  submitShell();
+});
+$("shell-cmd").addEventListener("input", (ev) => grow(ev.target));
+$("shell-cmd").addEventListener("keydown", (ev) => {
+  const box = ev.target;
+  if (ev.isComposing) return;
+  if (ev.key === "Enter" && !ev.shiftKey) {
+    ev.preventDefault();
+    return submitShell();
+  }
+  // ↑ and ↓ go through the commands typed before, as in a shell.
+  const step = ev.key === "ArrowUp" ? 1 : ev.key === "ArrowDown" ? -1 : 0;
+  if (!step || box.value.includes("\n") || ev.altKey || ev.ctrlKey || ev.metaKey) return;
+  if (step === 1 && historyAt === -1 && box.value) return;
+  const at = Math.min(shellHistory.length - 1, Math.max(-1, historyAt + step));
+  if (at === historyAt) return;
+  ev.preventDefault();
+  historyAt = at;
+  box.value = at < 0 ? "" : shellHistory[at];
+  grow(box);
+});
+$("pane-shell").addEventListener("click", (ev) => {
+  const i = entry(selected) && entry(selected).item;
+  if (!i) return;
+  const stop = ev.target.closest("[data-stop-run]");
+  if (stop) {
+    const r = (runs.get(i.key) || []).find((x) => String(x.id) === stop.dataset.stopRun);
+    if (r && r.state === "running") ((r.stopped = true), r.ctrl.abort());
+    return;
+  }
+  const reuse = ev.target.closest("[data-reuse]");
+  if (reuse && !getSelection().toString()) {
+    const r = (runs.get(i.key) || []).find((x) => String(x.id) === reuse.dataset.reuse);
+    if (r) (($("shell-cmd").value = r.command), grow($("shell-cmd")), $("shell-cmd").focus());
+    return;
+  }
+  if (ev.target.closest("[data-clear-runs]")) {
+    runs.set(i.key, (runs.get(i.key) || []).filter((r) => r.state === "running"));
+    paintRuns();
+    syncShell(entry(selected));
+  }
 });
 
 /** One handler for the session parts: the conversation, its dock, the tabs, files, changes, details. */

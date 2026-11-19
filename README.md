@@ -18,6 +18,8 @@ notification when one needs you, start new ones, and stage exactly one session's
 - **The conversation.** Read back what you and the session said, a page at a time. Markdown is
   rendered, tool calls fold into one line per run, and images (yours, and screenshots its tools
   took) show as thumbnails.
+- **A shell in each session's folder.** Run `git status` or the tests from the page, your phone
+  too, and see what they print.
 - **Search.** Find what you or an agent said in any session of the last 30 days, running or
   closed, and jump to that message.
 - **One tap to answer.** A permission prompt's or a question's choices become buttons, read off
@@ -156,11 +158,19 @@ left changes in this repository. Idle ones are folded away. Picking a session sh
 | Conversation | What you and the session said, newest at the bottom; scroll up for earlier pages. Tool calls fold into one line per run: open it to see each step. The last run shows its latest step. Images show as thumbnails (yours in your message, what its tools saw under their steps); a tap shows one large. Recaps, compactions and interruptions appear where they happened. What the session asks, and the reply box, stay at the bottom |
 | Changes | The hunks it made in its working tree, each with how sure the attribution is |
 | Files | Its repository, read-only: folders, Markdown rendered, code with line numbers, images. Paths in the conversation open here |
+| Shell | Shell commands of yours, run in its folder, with what they print as they run |
 | Details | Its tasks, background commands, pull requests (and why CI failed), the pages it published, its context, and how to resume it |
 
 Files stay inside the session's repository (or its own folder, outside one). `.git` is never
 shown, and neither are files that commonly hold secrets (`.env`, keys, credentials, `tfstate`).
 A session that runs in your home folder shows no files.
+
+**Shell** runs a command in the session's folder with your login shell, as a terminal there
+would: `git status`, `npm test`, a look at a log. It does not go through the agent, so nothing
+of it lands in the conversation. What it prints (both streams, colors left out) shows while it
+runs. Nothing is read from you: a command that asks for input gets an end of input, so run ones
+that do not ask. **Stop** ends it and what it started; it also ends after 10 minutes, or when
+you close the page. **↑** and **↓** bring back the commands you typed before.
 
 ![Files: a session's repository, its Markdown rendered](docs/screenshots/files.png)
 
@@ -418,8 +428,8 @@ How it is kept to you:
   made on this computer only (`agent-deck remote pair`, or **Remote → Add a phone** on the local
   page). A signed-in device cannot add others, and when one is added, the other devices get a
   notification.
-- **Looking is not acting.** Sending prompts or keys, staging, starting a session or sending files
-  needs the device's own passkey checked in the last five minutes; the page asks for it.
+- **Looking is not acting.** Sending prompts or keys, staging, starting a session, sending files
+  or running a shell command needs the device's own passkey checked in the last five minutes; the page asks for it.
   Someone who stole a session cookie can look, but not act.
 - The session is a signed, `HttpOnly`, `Secure`, `SameSite=Strict` cookie that names its
   passkey. Removing the device (`agent-deck remote revoke`, or **Remote**) ends its sessions and

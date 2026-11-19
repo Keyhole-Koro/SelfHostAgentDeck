@@ -21,6 +21,7 @@ import { focus, herdrAgents, herdrSockets, matchPanes, prompt, screen, sendKeys,
 import { moveToHerdr } from "./move.ts";
 import { choose } from "./answer.ts";
 import { applyHolds, hold, parseUntil, release, stateDir } from "./holds.ts";
+import { checkCommand, CommandError, runCommand } from "./command.ts";
 import { readInbox, transcriptOf, type Inbox, type InboxItem } from "./inbox.ts";
 import { prStatuses } from "./prs.ts";
 import { noticeButtons, parsePrompt } from "./prompts.ts";
@@ -466,14 +467,14 @@ export async function serve(opts: ServeOptions): Promise<Served> {
 
   /**
    * The API, for the local page and for signed-in devices (`device` set: remote, and logged). A
-   * device acts (prompts, keys, staging, starting, uploading) only within a few minutes of a
+   * device acts (prompts, keys, staging, starting, uploading, shell commands) only within a few minutes of a
    * passkey check: a stolen cookie alone can look, not act.
    */
   const api = async (req: IncomingMessage, res: ServerResponse, url: URL, device?: Passkey, fresh = false): Promise<void> => {
     const log = (action: string, target?: string, detail?: string) => {
       if (device) audit({ device: device.label, action, ...(target && { target }), ...(detail && { detail }) });
     };
-    const acting = req.method === "POST" && /^\/api\/(herdr\/(prompt|keys|choose)|stage|start|upload|move)$/.test(url.pathname);
+    const acting = req.method === "POST" && /^\/api\/(herdr\/(prompt|keys|choose)|stage|start|upload|move|command)$/.test(url.pathname);
     if (device && acting && !fresh) return json(res, 403, { error: "Confirm it is you with this device's passkey.", confirm: true });
     if (req.method === "GET" && url.pathname === "/api/inbox") {
       const inbox = currentInbox();
@@ -587,6 +588,20 @@ export async function serve(opts: ServeOptions): Promise<Served> {
         return json(res, 200, { ok: true, result });
       }
       return json(res, 404, { error: "Not found" });
+    }
+    if (req.method === "POST" && url.pathname === "/api/command") {
+      const b = await body(req);
+      const item = listed(b["key"]);
+      const command = String(b["command"] ?? "");
+      let cwd: string;
+      try {
+        cwd = checkCommand(command, item.cwd);
+      } catch (e) {
+        if (e instanceof CommandError) return json(res, e.status, { error: e.message });
+        throw e;
+      }
+      log("command", item.key, command.slice(0, 300));
+      return runCommand(command, cwd, res);
     }
     if (req.method === "GET" && url.pathname === "/api/chat") {
       const item = listed(url.searchParams.get("key"));

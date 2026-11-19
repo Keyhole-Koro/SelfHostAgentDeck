@@ -416,6 +416,35 @@ esac
     await page.click('[data-tab="chat"]');
   });
 
+  it("runs shell commands in the session's folder, shows what they print, and stops one", async () => {
+    await page.click('[data-tab="shell"]');
+    await page.waitForSelector("#shell-cmd");
+    assert.match(await page.locator("#shell-where").innerText(), new RegExp(repo.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+    await page.fill("#shell-cmd", "pwd; echo printed; exit 2");
+    await page.press("#shell-cmd", "Enter");
+    await page.waitForSelector("#shell-log .run .run-state.bad");
+    assert.equal(await page.locator("#shell-log .run-out").last().innerText(), `${repo}\nprinted`);
+    assert.match(await page.locator("#shell-log .run-state").last().innerText(), /exit 2/);
+    assert.equal(await page.inputValue("#shell-cmd"), "", "the box is ready for the next");
+    // A progress bar rewritten with \r shows its last state.
+    await page.fill("#shell-cmd", "printf '10%%\\r50%%\\r100%%\\n'");
+    await page.press("#shell-cmd", "Enter");
+    await until(async () => (await page.locator("#shell-log .run-out").last().innerText()) === "100%");
+    // ↑ brings back what was typed before.
+    await page.press("#shell-cmd", "ArrowUp");
+    await page.press("#shell-cmd", "ArrowUp");
+    assert.equal(await page.inputValue("#shell-cmd"), "pwd; echo printed; exit 2");
+    await page.fill("#shell-cmd", "echo waiting; sleep 30");
+    await page.press("#shell-cmd", "Enter");
+    await until(async () => (await page.locator("#shell-log .run-out").last().innerText()) === "waiting");
+    await shot("shell");
+    await page.click("[data-stop-run]");
+    await until(async () => /stopped/.test(await page.locator("#shell-log .run-state").last().innerText()));
+    await page.click("[data-clear-runs]");
+    assert.equal(await page.locator("#shell-log .run").count(), 0);
+    await page.click('[data-tab="chat"]');
+  });
+
   it("fits a phone: the list, then one session with its reply box, and Back", async () => {
     // Picked already (from the URL), so its reply box is first drawn while the list hides it.
     const phone = await another({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true }, "&s=claude:chatty");

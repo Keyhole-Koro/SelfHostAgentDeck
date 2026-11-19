@@ -201,6 +201,9 @@ describe("remote: pairing and signing in", () => {
     const blocked = await call("POST", "/api/herdr/prompt", { body: { key: "claude:s1", text: "rm -rf /" }, cookie: only, headers: page() });
     assert.equal(blocked.status, 403);
     assert.equal(blocked.json.confirm, true);
+    const shell = await call("POST", "/api/command", { body: { key: "claude:s1", command: "touch pwned" }, cookie: only, headers: page() });
+    assert.equal(shell.status, 403, "a shell command is acting too");
+    assert.equal(shell.json.confirm, true);
     assert.equal((await call("POST", "/api/hold", { body: { key: "claude:s1", kind: "later", until: "1h" }, cookie: only, headers: page() })).status, 200, "putting off is not acting");
     const asked = await call("POST", "/auth/confirm/options", { cookie: only, headers: page() });
     assert.deepEqual(asked.json.allowCredentials.map((c: { id: string }) => c.id), [passkey.id], "only this device's passkey");
