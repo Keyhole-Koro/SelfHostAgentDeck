@@ -10,6 +10,8 @@
  * whether the list is numbered or not.
  */
 
+import { createHash } from "node:crypto";
+
 export interface PromptChoice {
   /** Its place in the list, from "1": the number shown, when the list is numbered. */
   key: string;
@@ -22,6 +24,19 @@ export interface ScreenPrompt {
   /** The line above the choices: "Do you want to proceed?". */
   question?: string;
   choices: PromptChoice[];
+  /**
+   * Which dialog it is: a digest of its options and the lines above them (the command it would
+   * run), wherever the pointer is. Two prompts in a row with the same choices differ here.
+   */
+  sig: string;
+}
+
+/** How many lines above the options the digest takes in. */
+const SIG_ABOVE = 8;
+
+function sigOf(texts: string[]): string {
+  const plain = texts.map((t) => t.replace(/^[❯›>▶●➜→]\s*/, "")).filter(Boolean);
+  return createHash("sha256").update(plain.join("\n")).digest("hex").slice(0, 16);
 }
 
 /** How far up from the bottom (in non-empty lines) a dialog's choices may start. */
@@ -75,13 +90,15 @@ function numbered(rows: Line[]): ScreenPrompt | undefined {
   // A dialog's list counts from 1 without gaps.
   if (choices[0]?.key !== "1" || choices.some((c, n) => Number(c.key) !== n + 1)) return undefined;
   const above = rows[first - 1]?.text;
-  return { ...(above && { question: above.replace(/^[☐☒✔✓□■◆◇•·]\s*/, "") }), choices };
+  const sig = sigOf(rows.slice(Math.max(0, first - SIG_ABOVE), last + 1).map((r) => r.text));
+  return { ...(above && { question: above.replace(/^[☐☒✔✓□■◆◇•·]\s*/, "") }), choices, sig };
 }
 
 /**
  * Options without numbers: the one under the pointer and those whose text starts in the same
  * column, up to a blank line; lines further in are an option's description. It is a dialog only if
- * it asks something ("Do you want to proceed?") or says how to leave it ("Esc to cancel").
+ * it asks something right above them ("Do you want to proceed?") or says how to leave it ("Esc to
+ * cancel").
  */
 function unnumbered(lines: Line[], at: number): ScreenPrompt | undefined {
   // Where an option's text starts: after the pointer, on the line that has it.
@@ -103,13 +120,12 @@ function unnumbered(lines: Line[], at: number): ScreenPrompt | undefined {
     choices.push({ key: String(choices.length + 1), label: m ? m[1]!.trim() : lines[f]!.text, ...(m && { selected: true }) });
   }
   if (choices.length < 2 || choices.length > 9 || choices.filter((c) => c.selected).length !== 1) return undefined;
-  let question: string | undefined;
-  for (let f = first - 1; f >= 0; f--) {
-    if (!lines[f]!.text) continue;
-    if (colOf(f) < col) question = lines[f]!.text;
-    break;
-  }
-  const leave = lines.slice(last + 1).some((l) => /\besc\b/i.test(l.text));
+  // The question sits right above the options. Past a blank line or a rule it is the agent's last
+  // message, and the "options" are lines of a reply being written in its input box.
+  const above = lines[first - 1];
+  const question = above?.text && colOf(first - 1) < col ? above.text : undefined;
+  const leave = lines.slice(last + 1).some((l) => /\besc to (cancel|close|exit|go back|dismiss)\b/i.test(l.text));
   if (!question?.endsWith("?") && !leave) return undefined;
-  return { ...(question && { question }), choices };
+  const sig = sigOf(lines.slice(Math.max(0, first - SIG_ABOVE), last + 1).map((l) => l.text));
+  return { ...(question && { question }), choices, sig };
 }

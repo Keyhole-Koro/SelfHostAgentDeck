@@ -1,6 +1,13 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { parsePrompt } from "../src/prompts.ts";
+import { parsePrompt as parse } from "../src/prompts.ts";
+
+/** The parsed dialog, without its digest (tested on its own below). */
+const parsePrompt = (screen: string) => {
+  const p = parse(screen);
+  if (p) assert.match(p.sig, /^[0-9a-f]{16}$/);
+  return p && (({ sig: _, ...rest }) => rest)(p);
+};
 
 describe("choices on an agent's screen", () => {
   it("reads Claude Code's permission prompt, inside its box", () => {
@@ -89,6 +96,21 @@ describe("choices on an agent's screen", () => {
     assert.equal(parsePrompt(idle), undefined);
     const listed = ["Two ways:", "❯ keep it", "  drop it", "", "Your call."].join("\n");
     assert.equal(parsePrompt(listed), undefined, "neither asks nor says how to leave");
+  });
+
+  it("does not take a reply of two lines, being written under the agent's question, for a dialog", () => {
+    const codex = ["• Should I also update the README?", "", "› sure, and also", "  bump the version", "", "  ⏎ send   ⌃J newline"].join("\n");
+    assert.equal(parsePrompt(codex), undefined);
+    const claude = ["⏺ Done. Want me to commit this?", "──────────", "❯ yes but first rename the helper", "  and then run the linter", "──────────", "  Press Esc again to clear"].join("\n");
+    assert.equal(parsePrompt(claude), undefined);
+  });
+
+  it("tells two dialogs with the same choices apart, wherever the pointer is", () => {
+    const ask = (command: string, pointer: 0 | 1) => [" Bash command", "", `   ${command}`, "", " Do you want to proceed?", pointer ? "   Yes" : " ❯ Yes", pointer ? " ❯ No" : "   No", "", " Esc to cancel"].join("\n");
+    assert.equal(parse(ask("rm -rf build", 0))!.sig, parse(ask("rm -rf build", 1))!.sig);
+    assert.notEqual(parse(ask("rm -rf build", 0))!.sig, parse(ask("rm -rf src", 0))!.sig);
+    const numbered = (command: string) => [command, "Do you want to proceed?", "❯ 1. Yes", "  2. No"].join("\n");
+    assert.notEqual(parse(numbered("npm test"))!.sig, parse(numbered("npm publish"))!.sig);
   });
 
   it("finds no dialog in a numbered list far above, or one that does not start at 1", () => {

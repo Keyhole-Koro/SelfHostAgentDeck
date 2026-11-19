@@ -3,6 +3,7 @@ import { execFileSync, spawn, type ChildProcess } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
+import { inTerminal } from "./terminal.ts";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { summarize } from "../src/prs.ts";
 import { browser, decrypt, pushService } from "./push-browser.ts";
@@ -339,7 +340,10 @@ esac
     await assert.rejects(api.post("/api/herdr/keys", { key: "claude:sa", keys: ["ctrl+d"] }), /Keys not allowed: ctrl\+d/);
     await assert.rejects(api.post("/api/start", { dir: "/etc", agent: "claude", prompt: "x" }), /404 Not a folder of a listed session/);
     await assert.rejects(api.post("/api/herdr/prompt", { key: "claude:sa", text: "  " }), /Write a prompt/);
-    assert.deepEqual(await api.get(`/api/herdr/screen?key=${encodeURIComponent(`codex:${codexId}`)}`), {
+    const shown = await api.get(`/api/herdr/screen?key=${encodeURIComponent(`codex:${codexId}`)}`);
+    assert.match(shown.prompt.sig, /^[0-9a-f]{16}$/);
+    delete shown.prompt.sig;
+    assert.deepEqual(shown, {
       text: "Allow this command?\n> 1. Yes\n  2. No",
       prompt: { question: "Allow this command?", choices: [{ key: "1", label: "Yes", selected: true }, { key: "2", label: "No" }] },
     });
@@ -352,7 +356,9 @@ esac
     // A herdr whose dialog (no numbers, as in auto mode) follows the arrow keys, unless told to stick.
     const at = join(home, "pointer");
     const stuck = join(home, "stuck");
+    const cmd = join(home, "command");
     writeFileSync(at, "0");
+    writeFileSync(cmd, "rm -rf build");
     writeFileSync(
       join(home, "herdr"),
       `#!/bin/sh
@@ -360,7 +366,7 @@ echo "$HERDR_SOCKET_PATH $*" >> "${log}"
 case "$1 $2" in
   "agent list") printf '%s\n' '${JSON.stringify({ result: { type: "agent_list", agents: [{ pane_id: "w1:p9", agent_status: "blocked", agent: "claude", workspace_id: "w1" }] } })}' ;;
   "agent read") if [ "$(cat "${at}")" = 0 ]; then y="❯ Yes"; n="  No"; else y="  Yes"; n="❯ No"; fi
-    printf '{"result":{"type":"pane_read","read":{"text":" Do you want to proceed?\\\\n %s\\\\n %s\\\\n\\\\n Esc to cancel"}}}\n' "$y" "$n" ;;
+    printf '{"result":{"type":"pane_read","read":{"text":"   %s\\\\n\\\\n Do you want to proceed?\\\\n %s\\\\n %s\\\\n\\\\n Esc to cancel"}}}\n' "$(cat "${cmd}")" "$y" "$n" ;;
   "agent send-keys") [ -f "${stuck}" ] || case "$4" in down) echo 1 > "${at}" ;; up) echo 0 > "${at}" ;; esac
     printf '%s\n' '{"result":{"type":"ok"}}' ;;
   *) printf '%s\n' '{"result":{"type":"ok"}}' ;;
@@ -370,15 +376,23 @@ esac
     await eventually(async () => ((await api.get("/api/inbox")).items.some((i: { key: string; herdr?: object }) => i.key === "claude:sa" && i.herdr) ? true : undefined));
     const keys = () => readFileSync(log, "utf8").split("\n").filter((l) => l.includes("send-keys"));
 
-    await assert.rejects(api.post("/api/herdr/choose", { key: "claude:sa", index: 1, label: "Yes, and don't ask again" }), /409 Its screen shows other choices now/);
-    assert.deepEqual(keys(), [], "nothing pressed for choices that are not on the screen");
+    const sig = async () => (await api.get("/api/herdr/screen?key=claude%3Asa")).prompt.sig as string;
+    const first = await sig();
+    await assert.rejects(api.post("/api/herdr/choose", { key: "claude:sa", index: 1, label: "Yes, and don't ask again", sig: first }), /409 Its screen shows another question now/);
+    await assert.rejects(api.post("/api/herdr/choose", { key: "claude:sa", index: 1, label: "No" }), /400 Reload the page/);
+    writeFileSync(cmd, "rm -rf src");
+    await assert.rejects(api.post("/api/herdr/choose", { key: "claude:sa", index: 0, label: "Yes", sig: first }), /409 Its screen shows another question now/, "the same choices for another command");
+    assert.deepEqual(keys(), [], "nothing pressed for a dialog that is not on the screen");
 
-    assert.deepEqual((await api.post("/api/herdr/choose", { key: "claude:sa", index: 1, label: "No" })).result, { label: "No" });
+    writeFileSync(cmd, "rm -rf build");
+    assert.deepEqual((await api.post("/api/herdr/choose", { key: "claude:sa", index: 1, label: "No", sig: first })).result, { label: "No" });
     assert.deepEqual(keys(), [`${socket} agent send-keys w1:p9 down`, `${socket} agent send-keys w1:p9 enter`]);
+    await assert.rejects(api.post("/api/herdr/choose", { key: "claude:sa", index: 1, label: "No", sig: first }), /409 That was just answered/, "a second tap");
 
     writeFileSync(at, "0");
+    writeFileSync(cmd, "rm -rf dist");
     writeFileSync(stuck, "");
-    await assert.rejects(api.post("/api/herdr/choose", { key: "claude:sa", index: 1, label: "No" }), /409 The pointer did not get to “No”, so nothing was picked/);
+    await assert.rejects(api.post("/api/herdr/choose", { key: "claude:sa", index: 1, label: "No", sig: await sig() }), /409 The pointer did not get to “No”, so nothing was picked/);
     assert.deepEqual(keys().slice(2), [`${socket} agent send-keys w1:p9 down`], "no Enter when the pointer is not on it");
   });
 
@@ -386,10 +400,13 @@ esac
     const { api, log, socket } = await setUp();
     // Claude Code in a terminal outside herdr (a process named so, with no herdr pane), and one at work.
     const id = "5e55a0e1-0000-4000-8000-000000000001";
-    const outside = spawn("bash", ["-c", "exec -a claude-standin sleep 30"], { stdio: "ignore" });
+    // The one waiting runs in a terminal of its own, as in Ptyxis; the stand-in prints its pid and, at
+    // the end, the signal that closed it.
+    const term = inTerminal("exec -a claude-standin sleep 30");
     const busy = spawn("bash", ["-c", "exec -a claude-standin sleep 30"], { stdio: "ignore" });
     try {
-      running(id, outside.pid!, { status: "idle", name: "Rate-limit the API" });
+      const pid = await eventually(async () => term.pid());
+      running(id, pid, { status: "idle", name: "Rate-limit the API" });
       running("5e55a0e1-0000-4000-8000-000000000002", busy.pid!, { status: "busy" });
       const listed = await eventually(async () => {
         const by = Object.fromEntries((await api.get("/api/inbox")).items.map((i: { key: string }) => [i.key, i]));
@@ -399,16 +416,18 @@ esac
       await assert.rejects(api.post("/api/move", { key: "claude:sa" }), /409 It already runs in herdr/);
       await assert.rejects(api.post("/api/move", { key: "claude:5e55a0e1-0000-4000-8000-000000000002" }), /409 It can move once it waits for you/);
       assert.ok(busy.exitCode === null && !busy.signalCode, "a session at work is left alone");
+      running("5e55a0e1-0000-4000-8000-000000000003", busy.pid!, { status: "idle", kind: "bg" });
+      await assert.rejects(api.post("/api/move", { key: "claude:5e55a0e1-0000-4000-8000-000000000003" }), /409 It runs as a Claude Code background session/);
 
       const r = await api.post("/api/move", { key: `claude:${id}` });
       assert.equal(r.key, `claude:${id}`, "the same session, resumed");
       assert.equal(r.pane, "w2:p1");
-      assert.equal(outside.signalCode, "SIGTERM", "closed where it ran");
+      assert.equal(await eventually(async () => term.signal()), 15, "closed where it ran, with SIGTERM");
       const calls = readFileSync(log, "utf8").split("\n").filter((l) => l.includes("workspace") || l.includes("agent start"));
       assert.deepEqual(calls.slice(0, 2), [`${socket} workspace list`, `${socket} workspace create --cwd ${repo} --label ${basename(repo)} --no-focus`], "a tab is opened before anything is closed");
       assert.match(calls[2]!, new RegExp(`^${socket} agent start \\S+ --kind claude --pane w2:p1 --timeout 60000 -- --resume ${id}$`));
     } finally {
-      outside.kill();
+      term.process.kill();
       busy.kill();
     }
   });
@@ -435,6 +454,19 @@ describe("herdr: matching panes", () => {
     const m = matchPanes([item("codex:a", "Fix the login", "/w/app"), item("codex:b", "Unrelated", "/w/app")], panes);
     assert.equal(m.get("codex:a")?.pane, "w1:p1");
     assert.equal(m.get("codex:b"), undefined, "no guess without a matching title");
+  });
+
+  it("does not trust a pane from the environment when herdr says it shows another session", async () => {
+    const { matchPanes } = await import("../src/herdr.ts");
+    // A pane's Claude Code parked its own session (fe) to show a background one (bg), which was
+    // started from that pane and so carries its id in its environment too.
+    const terminal = { herdrPane: "w1:p3", herdrSocket: "s" };
+    const item = (id: string) => ({ key: `claude:${id}`, agent: "claude" as const, id, name: id, cwd: "/w", state: "your-turn" as const, since: 0, resume: "", terminal });
+    const panes = [{ pane: "w1:p3", socket: "s", status: "idle", agent: "claude", session: "bg" }];
+    const m = matchPanes([item("fe"), item("bg")], panes);
+    assert.equal(m.get("claude:bg")?.pane, "w1:p3");
+    assert.equal(m.get("claude:fe"), undefined, "typing to fe would reach bg");
+    assert.equal(matchPanes([item("fe")], [])?.get("claude:fe")?.status, "unknown", "a pane herdr does not list is still taken at its word");
   });
 });
 

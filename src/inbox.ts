@@ -1,4 +1,4 @@
-import { closeSync, existsSync, openSync, readdirSync, readFileSync, readSync, statSync } from "node:fs";
+import { closeSync, existsSync, openSync, readdirSync, readFileSync, readlinkSync, readSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, isAbsolute, join, resolve } from "node:path";
 import { sessionKey, type Agent } from "./types.ts";
@@ -892,7 +892,6 @@ export function runningSessions(claude = claudeHome(), codex = codexHome()): Map
 
 // ---------------------------------------------------------------- Codex
 
-/** Inode numbers of files someone holds a lock on (Linux); undefined where /proc/locks is absent. */
 /** Inodes of the files locked now, and the process holding each lock. */
 function lockedInodes(): Map<number, number> | undefined {
   let text: string;
@@ -911,6 +910,23 @@ function lockedInodes(): Map<number, number> | undefined {
     if (!out.has(ino)) out.set(ino, line.includes("->") ? 0 : Number(fields[at - 1]));
   }
   return out;
+}
+
+/** Whether a process has a file open (Linux). */
+function hasOpen(pid: number, file: string): boolean {
+  try {
+    const dir = `/proc/${pid}/fd`;
+    file = realpathSync(file);
+    return readdirSync(dir).some((fd) => {
+      try {
+        return readlinkSync(join(dir, fd)) === file;
+      } catch {
+        return false;
+      }
+    });
+  } catch {
+    return false;
+  }
 }
 
 const rolloutCache = new Map<string, string>();
@@ -1120,7 +1136,9 @@ function codexItems(home: string, now: number): { items: InboxItem[]; limits?: C
   // of the terminals too in newer versions: a process holding several, or that server, is no one
   // session's own, and must never be taken for one (to close, say).
   const holders = [...pids.values()];
-  for (const [id, pid] of pids) if (holders.indexOf(pid) !== holders.lastIndexOf(pid) || /\bapp-server\b/.test(commandOf(pid))) pids.delete(id);
+  // /proc/locks names a file by its inode alone, which another file system can repeat: the process
+  // must have the lock file itself open.
+  for (const [id, pid] of pids) if (holders.indexOf(pid) !== holders.lastIndexOf(pid) || /\bapp-server\b/.test(commandOf(pid)) || !hasOpen(pid, join(lockDir, `${id}.lock`))) pids.delete(id);
   findRollouts(join(home, "sessions"), ids);
   const names = threadNames(home);
   const items: InboxItem[] = [];

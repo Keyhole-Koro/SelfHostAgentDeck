@@ -515,7 +515,11 @@ export async function serve(opts: ServeOptions): Promise<Served> {
       if (!item) return json(res, 404, { error: "That session is no longer listed." });
       if (panes.has(item.key)) return json(res, 409, { error: "It already runs in herdr." });
       log("move to herdr", item.key);
-      return json(res, 200, { ok: true, ...(await moveToHerdr(item)) });
+      const still = () => {
+        const now = readInbox({ staleAfter: opts.staleAfter }).items.find((i) => i.key === item.key);
+        return now?.state === "your-turn" && now.pid === item.pid;
+      };
+      return json(res, 200, { ok: true, ...(await moveToHerdr(item, still)) });
     }
     /** A send herdr turned down, in words for the page; and in the log of what devices did. */
     const failed = (what: string, key: unknown, e: Error & { code?: string }): never => {
@@ -551,8 +555,10 @@ export async function serve(opts: ServeOptions): Promise<Served> {
       if (action === "choose") {
         const index = Number(b["index"]);
         const label = String(b["label"] ?? "");
+        const sig = String(b["sig"] ?? "");
         if (!Number.isInteger(index) || index < 0 || index > 8 || !label) throw new FileError("Pick one of its choices.", 400);
-        const result = await choose(pane, index, label).catch((e: Error) => failed("choose", b["key"], e));
+        if (!/^[0-9a-f]{16}$/.test(sig)) throw new FileError("Reload the page: it is older than Agent Deck.", 400);
+        const result = await choose(pane, index, label, sig).catch((e: Error) => failed("choose", b["key"], e));
         log("choose", String(b["key"]), label);
         return json(res, 200, { ok: true, result });
       }

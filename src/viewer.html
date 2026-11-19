@@ -574,6 +574,9 @@ let shown = {}; // what each part shows, to repaint only on change
 const views = new Map(); // `${repo}|${range}` → { at, view }
 const screens = new Map(); // session → its herdr screen, once asked for
 const drafts = new Map(); // session → the prompt being written
+const sending = new Set(); // sessions a prompt is on its way to: a second tap waits for the first
+const moving = new Set(); // sessions being moved into herdr
+let composing = false; // an IME is composing in the reply box: repainting it now would break that
 const attached = new Map(); // session → files sent for its next prompt: [{ name, path }]
 const ciLogs = new Map(); // pull request → why its CI failed: { loading } | { error } | { checks, log }
 /** The failing log, as a request the session can act on. */
@@ -1214,13 +1217,19 @@ function stepsHtml(steps, last) {
 // ------------------------------------------------------------ dock: answering through herdr
 
 /** Can be closed where it runs and opened again in herdr (see move.ts). */
-const movable = (i) => !!(inbox && inbox.herdrRunning && i.pid && !i.herdr && (i.agent === "claude" || i.agent === "codex"));
+const movable = (i) => !!(inbox && inbox.herdrRunning && i.pid && !i.herdr && !i.terminal && i.kind !== "bg" && (i.agent === "claude" || i.agent === "codex"));
+/** Why a running session cannot get replies from the page. */
+const whyOutside = (i) =>
+  i.terminal ? "its herdr pane shows another session now" : i.kind === "bg" ? "it runs as a Claude Code background session, outside herdr" : `it runs in ${esc(i.runsIn || "another terminal")}, outside herdr`;
 
 /** Why the page cannot reply to a session outside herdr, and the way to bring it in. */
 function outsideHtml(i) {
   const where = esc(i.runsIn || "another terminal");
+  if (i.terminal) return `<div class="outside"><p><b>No replies from here:</b> ${whyOutside(i)}. Switch back to it in that pane, and the page can reply again.</p></div>`;
+  if (i.kind === "bg") return `<div class="outside"><p><b>No replies from here:</b> ${whyOutside(i)}. Open it in a terminal with Claude Code to answer it.</p></div>`;
   let html = `<div class="outside"><p><b>No replies from here:</b> the page types into sessions through herdr, and this one runs in ${where}.</p>`;
-  if (movable(i) && i.state === "your-turn") html += `<p><button class="btn primary" data-act="move">${icon("goto", 16)}<span>Continue in herdr</span></button></p><p class="sub">It closes in ${where} and opens again in a new herdr tab, with the same conversation.</p>`;
+  if (moving.has(i.key)) html += `<p class="sub">Moving it into herdr…</p>`;
+  else if (movable(i) && i.state === "your-turn") html += `<p><button class="btn primary" data-act="move">${icon("goto", 16)}<span>Continue in herdr</span></button></p><p class="sub">It closes in ${where} and opens again in a new herdr tab, with the same conversation.</p>`;
   else if (movable(i)) html += `<p class="sub">${i.state === "working" ? "Once it finishes this turn" : `Once you answer it in ${where}`}, you can move it into herdr from here.</p>`;
   else if (!inbox.herdrRunning) html += `<p class="sub">Start <a href="https://herdr.dev" target="_blank" rel="noopener">herdr</a> on that computer to move it there.</p>`;
   html += `<p class="sub">Or go back to it there: <code class="cmd">${esc(i.resume)}</code> <button class="btn small" data-copy="${esc(i.resume)}">Copy</button></p></div>`;
@@ -1233,19 +1242,19 @@ async function untilInHerdr(key) {
     await new Promise((r) => setTimeout(r, 1500));
     await loadInbox();
     const e = entry(key);
-    if (e && e.item && e.item.herdr) {
-      if (selected !== key) select(key);
-      return true;
-    }
+    if (e && e.item && e.item.herdr) return true; // the page shows it from herdr now, if you are still on it
   }
   return false;
 }
 
 function paintDock(e) {
   const i = e && e.item;
-  const key = i ? JSON.stringify([i.key, i.state, !!i.herdr, i.reason, i.questions, i.plan, i.hold, quick, attached.get(i.key), i.runsIn, !!i.pid, inbox.herdrRunning]) : e ? e.key : "";
+  const key = i ? JSON.stringify([i.key, i.state, !!i.herdr, i.reason, i.questions, i.plan, i.hold, quick, attached.get(i.key), i.runsIn, !!i.pid, inbox.herdrRunning, moving.has(i.key)]) : e ? e.key : "";
   if (key === shown.dock) return;
+  // Mid-composition (Japanese, say), wait for it to end: see compositionend.
+  if (composing && document.activeElement && document.activeElement.id === "prompt") return;
   shown.dock = key;
+  const typing = document.activeElement && document.activeElement.id === "prompt" ? [document.activeElement.selectionStart, document.activeElement.selectionEnd] : null;
   let html = "";
   if (i && i.state === "needs-answer") html += askHtml(i);
   if (i && i.herdr && i.state !== "needs-answer") {
@@ -1266,6 +1275,11 @@ function paintDock(e) {
   }
   $("dock").parentElement.hidden = !html;
   $("dock").innerHTML = html + `<p class="note" id="answer-note"></p>`;
+  // Repainted while you typed: go on typing where you were (on a phone, the keyboard stays up).
+  if (typing && $("prompt")) {
+    $("prompt").focus({ preventScroll: true });
+    $("prompt").setSelectionRange(typing[0], typing[1]);
+  }
   if ($("prompt")) grow($("prompt"));
   // What it asks, as its screen shows it.
   if (i && i.state === "needs-answer" && i.herdr && !screens.has(i.key)) void act("screen");
@@ -1285,7 +1299,7 @@ function askHtml(i) {
   if (p) {
     if (!questions.length && p.question) questions.push(p.question);
     html += questions.map((q) => `<div class="q">${esc(q)}</div>`).join("");
-    html += `<div class="choices">${p.choices.map((c, n) => `<button class="choice${c.selected ? " selected" : ""}" data-choose="${n}" data-label="${esc(c.label)}"><span class="k">${c.key}</span><span>${esc(c.label)}</span></button>`).join("")}</div>`;
+    html += `<div class="choices" data-sig="${esc(p.sig || "")}">${p.choices.map((c, n) => `<button class="choice${c.selected ? " selected" : ""}" data-choose="${n}" data-label="${esc(c.label)}"><span class="k">${c.key}</span><span>${esc(c.label)}</span></button>`).join("")}</div>`;
   } else {
     for (const q of i.questions || []) {
       html += `<div class="q">${esc(q.question)}</div>`;
@@ -1662,19 +1676,28 @@ async function uploadNew(list) {
   paintNewFiles();
 }
 
+let starting = false;
 async function startNew() {
+  if (starting) return;
   const agent = document.querySelector('input[name="ns-agent"]:checked').value;
   const req = { dir: $("ns-dir").value, agent, model: $("ns-model").value.trim(), effort: $("ns-effort").value, branch: $("ns-wt").checked ? $("ns-branch").value.trim() : "", prompt: $("ns-prompt").value, files: newFiles.map((f) => f.path) };
   if ($("ns-wt").checked && !req.branch) return setNote("ns-note", "Name the branch for the worktree.", false);
   store("new", { agent, model: req.model, effort: req.effort });
   setNote("ns-note", "Starting: a tab in herdr, then the agent…", true);
+  starting = true;
+  const start = document.querySelector('[data-act="ns-start"]');
+  if (start) start.disabled = true;
   try {
     const s = await post("/api/start", req);
     newFiles = [];
+    $("ns-prompt").value = "";
     waitingFor = { key: s.key, pane: s.pane, until: Date.now() + 90_000 };
     setNote("ns-note", "Started. It opens here as soon as it shows up.", true);
   } catch (e) {
     setNote("ns-note", e.message, false);
+  } finally {
+    starting = false;
+    if (start) start.disabled = false;
   }
 }
 
@@ -1917,7 +1940,7 @@ function cardAsk(i) {
   const questions = (i.questions || []).map((q) => q.question);
   if (!questions.length && p && p.question) questions.push(p.question);
   html += questions.map((q) => `<div class="q">${esc(q)}</div>`).join("");
-  if (p) html += `<div class="choices">${p.choices.map((c, n) => `<button class="choice${c.selected ? " selected" : ""}" data-card-choose="${n}" data-label="${esc(c.label)}"><span class="k">${c.key}</span><span>${esc(c.label)}</span></button>`).join("")}</div>`;
+  if (p) html += `<div class="choices" data-sig="${esc(p.sig || "")}">${p.choices.map((c, n) => `<button class="choice${c.selected ? " selected" : ""}" data-card-choose="${n}" data-label="${esc(c.label)}"><span class="k">${c.key}</span><span>${esc(c.label)}</span></button>`).join("")}</div>`;
   else if (i.herdr) html += `<div class="sub">Reading its screen…</div>`;
   else html += `<div class="sub">Answer it where it runs: <code class="cmd">${esc(i.resume)}</code></div>`;
   return html;
@@ -1963,7 +1986,9 @@ function cards(container, items, size = "tile") {
     const outside = !i.herdr && i.state !== "stale";
     el.querySelector(".card-reply").hidden = i.herdr ? i.state === "needs-answer" : !outside;
     el.querySelector(".card-form").hidden = el.querySelector(".card-quick").hidden = !i.herdr;
-    setPart(el.querySelector(".card-outside"), outside ? `No replies from here: it runs in ${esc(i.runsIn || "another terminal")}, outside herdr.${movable(i) ? ` <button data-card-open>Open it</button> to move it into herdr.` : ""}` : "");
+    const input = el.querySelector(".card-input");
+    if (input.placeholder !== replyHint(i)) input.placeholder = replyHint(i);
+    setPart(el.querySelector(".card-outside"), outside ? `No replies from here: ${whyOutside(i)}.${movable(i) ? ` <button data-card-open>Open it</button> to move it into herdr.` : ""}` : "");
   }
 }
 
@@ -1974,7 +1999,7 @@ const deck = {
   open: (key) => openFromLayout(key),
   send: (key, text) => post("/api/herdr/prompt", { key, text }),
   press: (key, k) => post("/api/herdr/keys", { key, keys: [k] }),
-  choose: (key, index, label) => post("/api/herdr/choose", { key, index, label }),
+  choose: (key, index, label, sig) => post("/api/herdr/choose", { key, index, label, sig }),
   markdown,
   esc,
 };
@@ -2037,12 +2062,15 @@ function openFromLayout(key) {
   openSession(key);
 }
 
-async function cardAct(key, card, run) {
+/** Runs a card's action, one at a time per card: a double tap must not send, or answer, twice. */
+async function cardAct(key, card, run, done = card.querySelector(".send-btn")) {
+  if (card.dataset.busy) return false;
+  card.dataset.busy = "1";
   const note = card.querySelector(".card-note");
   try {
     await run();
     if (note) ((note.textContent = ""), (note.className = "card-note"));
-    flash(card.querySelector(".send-btn"));
+    flash(done);
     setTimeout(() => {
       const st = cardState.get(key);
       if (st) st.screenSince = null; // read what it asks next
@@ -2052,6 +2080,8 @@ async function cardAct(key, card, run) {
   } catch (e) {
     if (note) ((note.textContent = e.message), (note.className = "card-note error"));
     return false;
+  } finally {
+    delete card.dataset.busy;
   }
 }
 
@@ -2062,11 +2092,16 @@ function cardClick(ev) {
   const key = card.dataset.card;
   if (ev.target.closest("[data-card-open]")) return openFromLayout(key);
   const ch = ev.target.closest("[data-card-choose]");
-  if (ch) return void cardAct(key, card, () => deck.choose(key, Number(ch.dataset.cardChoose), ch.dataset.label));
+  if (ch) {
+    if (card.dataset.busy) return;
+    ch.classList.add("picked"); // stays until the card reads what it asks next
+    const sig = ch.closest(".choices").dataset.sig;
+    return void cardAct(key, card, () => deck.choose(key, Number(ch.dataset.cardChoose), ch.dataset.label, sig), null).then((ok) => ok || ch.classList.remove("picked"));
+  }
   const k = ev.target.closest("[data-card-key]");
-  if (k) return void cardAct(key, card, () => deck.press(key, k.dataset.cardKey));
+  if (k) return void cardAct(key, card, () => deck.press(key, k.dataset.cardKey), k);
   const q = ev.target.closest("[data-card-quick]");
-  if (q) return void cardAct(key, card, () => deck.send(key, q.dataset.cardQuick));
+  if (q) return void cardAct(key, card, () => deck.send(key, q.dataset.cardQuick), null);
 }
 function cardSubmit(ev) {
   const form = ev.target.closest && ev.target.closest("[data-card-form]");
@@ -2074,8 +2109,14 @@ function cardSubmit(ev) {
   ev.preventDefault();
   const card = form.closest("[data-card]");
   const input = form.querySelector(".card-input");
-  const text = input.value.trim();
-  if (text) void cardAct(card.dataset.card, card, () => deck.send(card.dataset.card, text)).then((ok) => ok && (input.value = ""));
+  const sent = input.value;
+  const text = sent.trim();
+  if (text)
+    void cardAct(card.dataset.card, card, () => deck.send(card.dataset.card, text)).then((ok) => {
+      if (!ok) return;
+      input.value = afterSent(input.value, sent);
+      input.style.height = "";
+    });
 }
 $("layout-root").addEventListener("click", cardClick);
 $("layout-root").addEventListener("submit", cardSubmit);
@@ -2285,22 +2326,29 @@ async function act(name, el) {
       paintDock(entry(selected));
       if ($("screen")) $("screen").scrollTop = $("screen").scrollHeight;
     } else if (name === "prompt") {
-      const text = $("prompt").value.trim();
+      const sent = $("prompt").value;
+      const text = sent.trim();
       const files = attached.get(i.key) || [];
-      if (!text && !files.length) return;
-      await sendPrompt(i, files.length ? `${text}\n\nFiles I sent you:\n${files.map((f) => `- ${f.path}`).join("\n")}`.trim() : text);
-      drafts.delete(i.key);
+      if ((!text && !files.length) || sending.has(i.key)) return;
+      if (!(await sendPrompt(i, files.length ? `${text}\n\nFiles I sent you:\n${files.map((f) => `- ${f.path}`).join("\n")}`.trim() : text))) return;
+      const left = afterSent(drafts.get(i.key) || "", sent);
+      left ? drafts.set(i.key, left) : drafts.delete(i.key);
       attached.delete(i.key);
-      if ($("prompt")) ($("prompt").value = ""), grow($("prompt"));
+      if ($("prompt") && selected === i.key) ($("prompt").value = left), grow($("prompt"));
       paintDock(entry(selected));
     } else if (name === "move") {
       const where = i.runsIn || "its terminal";
       if (!confirm(`Continue "${nameOf(i)}" in herdr?\n\nIt closes in ${where} and opens again in a new herdr tab, with the same conversation. Then you can reply to it from here.`)) return;
-      el.disabled = true;
-      note("answer-note", "Moving it into herdr…", true);
-      const r = await post("/api/move", { key: i.key });
-      note("answer-note", "It is in herdr now; opening it…", true);
-      if (!(await untilInHerdr(r.key || i.key))) note("answer-note", "herdr opened it, but it has not shown up here yet.", false);
+      if (moving.has(i.key)) return;
+      moving.add(i.key);
+      paintDock(entry(selected));
+      try {
+        const r = await post("/api/move", { key: i.key });
+        if (!(await untilInHerdr(r.key || i.key)) && selected === i.key) note("answer-note", "herdr opened it, but it has not shown up here yet.", false);
+      } finally {
+        moving.delete(i.key);
+        if (selected === i.key) paintDock(entry(selected));
+      }
     } else if (name === "attach") {
       $("attach").click();
     } else if (name === "ns-attach") {
@@ -2375,20 +2423,36 @@ async function uploadFiles(i, list) {
   paintDock(entry(selected));
 }
 
+/** Sends a prompt, unless one is on its way to that session already (a double tap); says whether it sent. */
 async function sendPrompt(i, text) {
-  await post("/api/herdr/prompt", { key: i.key, text });
-  setNote("answer-note", "", true);
-  flash(document.querySelector('#dock [data-act="prompt"]'));
+  if (sending.has(i.key)) return false;
+  sending.add(i.key);
+  try {
+    await post("/api/herdr/prompt", { key: i.key, text });
+  } finally {
+    sending.delete(i.key);
+  }
+  if (selected === i.key) {
+    setNote("answer-note", "", true);
+    flash(document.querySelector('#dock [data-act="prompt"]'));
+  }
   setTimeout(() => void loadChat("newer"), 1500);
+  return true;
+}
+
+/** What is left in a reply box once what it held at sending has gone: anything typed meanwhile. */
+function afterSent(now, sent) {
+  return now.startsWith(sent) ? now.slice(sent.length).replace(/^\s+/, "") : now;
 }
 
 /** A button says it worked by turning into a check for a moment, instead of a line of text. */
 function flash(btn) {
   if (!btn) return;
-  const was = btn.innerHTML;
+  if (!btn.classList.contains("done")) btn.dataset.was = btn.innerHTML; // not the check of a flash under way
   btn.classList.add("done");
   btn.innerHTML = icon("check", btn.classList.contains("small") ? 16 : 20);
-  setTimeout(() => btn.isConnected && (btn.classList.remove("done"), (btn.innerHTML = was)), 1200);
+  clearTimeout(btn.flashing);
+  btn.flashing = setTimeout(() => btn.isConnected && (btn.classList.remove("done"), (btn.innerHTML = btn.dataset.was)), 1200);
 }
 
 /** Picks a choice of the dialog on its screen (the server moves to it, checks, then presses Enter). */
@@ -2400,20 +2464,22 @@ async function chooseOne(el) {
   el.classList.add("picked");
   setNote("answer-note", "", true);
   try {
-    await post("/api/herdr/choose", { key: i.key, index: Number(el.dataset.choose), label });
+    await post("/api/herdr/choose", { key: i.key, index: Number(el.dataset.choose), label, sig: el.closest(".choices").dataset.sig });
   } catch (e) {
     el.classList.remove("picked");
     setNote("answer-note", e.message, false);
     for (const b of document.querySelectorAll("#dock [data-choose]")) b.disabled = false;
+    return; // the reason stays up; "Read it again" shows the screen as it is
   }
-  setTimeout(() => $("screen") && act("screen"), 700); // what it asks next, if anything
+  setTimeout(() => $("screen") && selected === i.key && act("screen"), 700); // what it asks next, if anything
 }
 
-async function pressKey(k) {
+async function pressKey(k, el) {
   const i = entry(selected) && entry(selected).item;
   try {
     await post("/api/herdr/keys", { key: i.key, keys: [k] });
     setNote("answer-note", "", true);
+    flash(el);
     setTimeout(() => $("screen") && act("screen"), 700); // show what it did, and what it asks next
   } catch (e) {
     $("answer-note").textContent = e.message;
@@ -2482,7 +2548,7 @@ $("app").addEventListener("click", (ev) => {
   const ch = t.closest("[data-choose]");
   if (ch) return void chooseOne(ch);
   const k = t.closest("[data-key-press]");
-  if (k) return void pressKey(k.dataset.keyPress);
+  if (k) return void pressKey(k.dataset.keyPress, k);
   const q = t.closest("[data-quick]");
   if (q) return void act("quick", q);
   const sl = t.closest("[data-slash]");
@@ -2576,6 +2642,11 @@ $("app").addEventListener("keydown", (ev) => {
   if (!sendKeyPressed(ev)) return;
   if (ev.target.id === "prompt") ev.preventDefault(), act("prompt");
   if (ev.target.id === "ns-prompt") ev.preventDefault(), act("ns-start");
+});
+$("app").addEventListener("compositionstart", () => (composing = true));
+$("app").addEventListener("compositionend", () => {
+  composing = false;
+  setTimeout(() => paintDock(entry(selected))); // what waited for it
 });
 $("app").addEventListener("change", (ev) => {
   const i = entry(selected) && entry(selected).item;

@@ -3,6 +3,7 @@ import { execFileSync, spawn, type ChildProcess } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { inTerminal } from "./terminal.ts";
 import { after, before, describe, it } from "node:test";
 
 // Run inside herdr or not, the processes these tests start must not inherit a real herdr pane.
@@ -160,6 +161,7 @@ printf '%s\\n' "$*" >> "${herdrLog}"
 case "$1 $2" in
   "agent list") printf '%s\\n' '${JSON.stringify({ id: "l", result: { type: "agent_list", agents } })}' ;;
   "agent read") printf '%s\\n' '${JSON.stringify({ id: "r", result: { type: "pane_read", read: { text: "Which default sort?\n> 1. Relevance\n  2. Newest" } } })}' ;;
+  "agent prompt") [ "$4" = "Slow one" ] && sleep 1; printf '%s\\n' '{"id":"x","result":{"type":"agent_info"}}' ;;
   "workspace list") printf '%s\\n' '{"result":{"type":"workspace_list","workspaces":[]}}' ;;
   "workspace create") printf '%s\\n' '{"result":{"type":"workspace_created","root_pane":{"pane_id":"w9:p1"},"tab":{},"workspace":{}}}' ;;
   *) printf '%s\\n' '{"id":"x","result":{"type":"agent_info"}}' ;;
@@ -269,6 +271,21 @@ esac
     assert.ok(!herdrCalls().some((l) => l.includes("Open the PR")), "Enter alone does not send");
     await page.press("#prompt", "Control+Enter");
     await until(() => herdrCalls().includes("agent prompt w1:p2 Open the PR"));
+    await page.fill("#prompt", "Twice");
+    await page.dblclick('#dock [data-act="prompt"]');
+    await until(async () => (await page.inputValue("#prompt")) === "");
+    assert.equal(herdrCalls().filter((l) => l === "agent prompt w1:p2 Twice").length, 1, "a double click sends once");
+    // Typing on while it sends: what was typed after stays in the box, and the box keeps the focus
+    // when the session's part of the page is drawn again.
+    await page.fill("#prompt", "Slow one");
+    await page.press("#prompt", "Control+Enter");
+    await page.keyboard.type("next");
+    await until(() => herdrCalls().includes("agent prompt w1:p2 Slow one"));
+    await until(async () => (await page.inputValue("#prompt")) === "next");
+    await page.evaluate('shown.dock = ""; paintDock(entry(selected))'); // the page's own globals
+    await page.keyboard.type(" step");
+    assert.equal(await page.inputValue("#prompt"), "next step");
+    await page.fill("#prompt", "");
     assert.equal(await page.locator("#dock [data-quick]").count(), 0, "no one-tap replies until you add some");
     await page.click('#dock [data-act="tune"]');
     page.once("dialog", (d) => void d.accept("続けて | Continue"));
@@ -453,10 +470,11 @@ esac
   it("says why a session in another terminal has no reply box, and moves it into herdr", async () => {
     const id = "0a7e5c1d-0000-4000-8000-00000000000a";
     // Claude Code in a terminal tab outside herdr: a process named so, in no herdr pane.
-    const elsewhere = spawn("bash", ["-c", "exec -a claude-standin sleep 120"], { stdio: "ignore" });
-    kids.push(elsewhere);
+    const elsewhere = inTerminal("exec -a claude-standin sleep 120");
+    kids.push(elsewhere.process);
     transcript(id, [{ type: "ai-title", aiTitle: "Elsewhere" }]);
-    running(id, elsewhere.pid!, { status: "idle" });
+    await until(() => !!elsewhere.pid());
+    running(id, elsewhere.pid()!, { status: "idle" });
     await page.click(`.session[data-key="claude:${id}"]`, { timeout: 10_000 });
     await page.waitForSelector("#dock .outside");
     assert.match(await page.locator("#dock .outside").innerText(), /No replies from here: the page types into sessions through herdr/);
@@ -465,7 +483,7 @@ esac
     page.once("dialog", (d) => void d.accept());
     await page.click('#dock [data-act="move"]');
     await until(() => herdrCalls().some((l) => l === `agent start ${l.split(" ")[2]} --kind claude --pane w9:p1 --timeout 60000 -- --resume ${id}`));
-    await until(() => elsewhere.signalCode === "SIGTERM");
+    await until(() => elsewhere.signal() === 15);
     assert.ok(herdrCalls().findIndex((l) => l.startsWith("workspace create")) < herdrCalls().findIndex((l) => l.includes(`--resume ${id}`)));
   });
 

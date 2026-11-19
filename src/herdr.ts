@@ -131,14 +131,20 @@ export function matchPanes(items: InboxItem[], agents: HerdrAgent[]): Map<string
   const out = new Map<string, HerdrAgent>();
   for (const i of items) {
     const t = i.terminal;
+    const ours = (x: HerdrAgent) => !!x.session && (x.session === i.id || x.session.endsWith(`${i.id}.jsonl`));
     let a = t ? agents.find((x) => x.pane === t.herdrPane && x.socket === t.herdrSocket) : undefined;
-    a ??= agents.find((x) => !!x.session && (x.session === i.id || x.session.endsWith(`${i.id}.jsonl`)));
+    // The environment is inherited, so it can name a pane the session is not in: a background
+    // session started from a pane keeps that pane's, and a pane's Claude Code can park its own
+    // session to show another. When herdr knows which session its pane shows, that settles it.
+    const taken = !!a && !!a.session && !ours(a);
+    if (taken) a = undefined;
+    a ??= agents.find(ours);
     if (!a && i.agent === "codex") {
       const here = agents.filter((x) => x.agent === "codex" && !x.session && !!i.cwd && x.cwd === i.cwd);
       const named = here.filter((x) => !!x.title && (x.title.startsWith(i.name) || (!!i.title && x.title.startsWith(i.title))));
       a = named.length === 1 ? named[0] : undefined;
     }
-    if (!a && t) a = { pane: t.herdrPane, socket: t.herdrSocket, status: "unknown" };
+    if (!a && t && !taken) a = { pane: t.herdrPane, socket: t.herdrSocket, status: "unknown" };
     if (a) out.set(i.key, a);
   }
   return out;
