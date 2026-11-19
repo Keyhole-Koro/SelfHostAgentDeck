@@ -298,9 +298,18 @@ esac
     await until(() => herdrCalls().includes("agent prompt w1:p2 /model opus"));
     await page.setInputFiles("#attach", { name: "shot.png", mimeType: "image/png", buffer: Buffer.from([0x89, 0x50, 0x4e, 0x47]) });
     await page.waitForSelector("#dock .att");
+    // A screenshot pasted into the box goes with it too, named by when it was pasted.
+    await page.evaluate(() => {
+      const dt = new DataTransfer();
+      dt.items.add(new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], "image.png", { type: "image/png" }));
+      document.getElementById("prompt")!.dispatchEvent(new ClipboardEvent("paste", { clipboardData: dt, bubbles: true, cancelable: true }));
+    });
+    await until(async () => (await page.locator("#dock .att").count()) === 2);
+    assert.match(await page.locator("#dock .att .nm").last().innerText(), /^pasted-\d{6}\.png$/);
+    assert.equal(await page.locator("#dock .att img").count(), 2, "a preview of each image");
     await page.fill("#prompt", "Look at this");
     await page.click('[data-act="prompt"]');
-    await until(() => herdrCalls().some((l) => l.includes("Look at this")) && herdrCalls().some((l) => /\.agent-deck\/uploads\/\d{8}-\d{6}-shot\.png/.test(l)));
+    await until(() => herdrCalls().some((l) => l.includes("Look at this")) && herdrCalls().some((l) => /\.agent-deck\/uploads\/\d{8}-\d{6}-shot\.png/.test(l)) && herdrCalls().some((l) => /\.agent-deck\/uploads\/\d{8}-\d{6}-pasted-\d{6}\.png/.test(l)));
     assert.equal(await page.locator("#dock .att").count(), 0, "sent with the prompt");
     await page.click('[data-tab="changes"]');
     await page.waitForSelector(".comment-btn");

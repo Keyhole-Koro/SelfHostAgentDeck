@@ -332,6 +332,8 @@ pre.code.numbered code { counter-reset: ln; display: block; min-width: max-conte
 .ln::before { counter-increment: ln; content: counter(ln); position: absolute; left: 0; width: 3.2em; text-align: right; color: var(--faint); }
 .doc { max-width: 760px; }
 img.shot { max-width: 100%; height: auto; border-radius: 8px; border: 1px solid var(--line); }
+.att img { width: 28px; height: 28px; object-fit: cover; border-radius: 4px; margin-right: 6px; vertical-align: middle; }
+.dropping { outline: 2px dashed var(--accent); outline-offset: -4px; border-radius: 10px; }
 /* Images in the conversation: a fixed height, so the conversation does not jump as they come in. */
 .pics { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
 .msg.pics-row { margin-top: -4px; }
@@ -1319,7 +1321,7 @@ function paintDock(e) {
     const tune = i.state === "your-turn" && !i.hold ? `<button class="icon-btn" data-act="tune" aria-expanded="${tuneOpen}" aria-pressed="${tuneOpen}" aria-controls="tune-panel" title="${i.agent === "claude" ? "Model, effort and one-tap replies" : "One-tap replies"}" aria-label="${i.agent === "claude" ? "Model, effort and one-tap replies" : "One-tap replies"}">${icon("tune")}</button>` : "";
     const stop = i.state === "working" ? `<button class="icon-btn" data-key-press="esc" title="Stop it (Esc)" aria-label="Stop">${icon("stop")}</button>` : "";
     const files = attached.get(i.key) || [];
-    if (files.length) html += `<div class="attached">${files.map((f, n) => `<span class="att" title="${esc(f.path)}"><span class="nm">${esc(f.name)}</span><button data-unattach="${n}" aria-label="Do not send ${esc(f.name)}">×</button></span>`).join("")}</div>`;
+    if (files.length) html += `<div class="attached">${files.map((f, n) => `<span class="att" title="${esc(f.path)}">${f.look ? `<img src="${f.look}" alt="">` : ""}<span class="nm">${esc(f.name)}</span><button data-unattach="${n}" aria-label="Do not send ${esc(f.name)}">×</button></span>`).join("")}</div>`;
     html += `<div class="composer"><button class="icon-btn" data-act="attach" title="Send files: photos, logs, documents" aria-label="Send files">${icon("plus", 20)}</button><input type="file" id="attach" multiple hidden>${tune}<textarea id="prompt" rows="1" aria-label="Message to the session" placeholder="${replyHint(i)}" title="${SEND_KEYS} sends">${esc(drafts.get(i.key) || "")}</textarea>${stop}<button class="send-btn" data-act="prompt" title="Send (${SEND_KEYS})" aria-label="Send">${icon("send")}</button></div>`;
     if (i.state === "working") html += `<p class="sub hint">It is working; your message waits in its queue.</p>`;
   } else if (i && !i.herdr && i.state !== "stale") {
@@ -1690,7 +1692,7 @@ async function paintNew() {
   let html = pageHead("New session", "Starts Claude Code or Codex in a new herdr tab, in one of your sessions' folders, with your first message.");
   if (!p.herdr) html += `<p class="note error">herdr is off (--no-herdr): sessions cannot be started from here.</p>`;
   if (!p.projects.length) html += `<p class="note">No folders yet: they come from the running sessions.</p>`;
-  html += `<div class="form">
+  html += `<div class="form" id="ns-form">
     <label>Folder<select id="ns-dir">${p.projects.map((o) => `<option value="${esc(o.dir)}"${o.dir === here ? " selected" : ""}>${esc(o.name)} · ${esc(o.dir)}</option>`).join("")}</select></label>
     <div class="seg" role="radiogroup" aria-label="Agent"><label><input type="radio" name="ns-agent" value="claude"${last.agent !== "codex" ? " checked" : ""}> Claude Code</label><label><input type="radio" name="ns-agent" value="codex"${last.agent === "codex" ? " checked" : ""}> Codex</label></div>
     <div class="two"><label>Model<input id="ns-model" list="ns-models" placeholder="its default" value="${esc(last.model || "")}" autocomplete="off"></label><label>Effort<select id="ns-effort"><option value="">its default</option>${p.efforts.map((x) => `<option${x === last.effort ? " selected" : ""}>${x}</option>`).join("")}</select></label></div>
@@ -2466,7 +2468,8 @@ async function uploadFiles(i, list) {
     setNote("answer-note", `Sending ${f.name}…`, true);
     try {
       const up = await api(`/api/upload?key=${encodeURIComponent(i.key)}`, { method: "POST", body: f, headers: { "content-type": "application/octet-stream", "x-file-name": encodeURIComponent(f.name) } });
-      attached.set(i.key, [...(attached.get(i.key) || []), { name: f.name, path: up.path }]);
+      const look = /^image\/(png|jpeg|gif|webp)$/.test(f.type) ? URL.createObjectURL(f) : "";
+      attached.set(i.key, [...(attached.get(i.key) || []), { name: f.name, path: up.path, look }]);
     } catch (e) {
       setNote("answer-note", `${f.name}: ${e.message}`, false);
       return;
@@ -2697,6 +2700,44 @@ $("app").addEventListener("keydown", (ev) => {
   if (ev.target.id === "prompt") ev.preventDefault(), act("prompt");
   if (ev.target.id === "ns-prompt") ev.preventDefault(), act("ns-start");
 });
+/** Files pasted (a screenshot copied to the clipboard) or dropped: sent with the reply, as with "+". */
+function filesFrom(list) {
+  const at = new Date().toTimeString().slice(0, 8).replace(/:/g, "");
+  // A copied screenshot comes as "image.png" each time: name it by when it was pasted.
+  return [...list].map((f, n) => (/^image\.\w+$/.test(f.name) ? new File([f], `pasted-${at}${n ? `-${n + 1}` : ""}.${f.name.split(".")[1]}`, { type: f.type }) : f));
+}
+function takeFiles(target, list) {
+  const i = entry(selected) && entry(selected).item;
+  const files = filesFrom(list);
+  if (!files.length) return false;
+  if (target.closest("#dock") && i && i.herdr && $("prompt")) return void uploadFiles(i, files), true;
+  if (target.closest("#ns-form") && $("ns-prompt")) return void uploadNew(files), true;
+  return false;
+}
+$("app").addEventListener("paste", (ev) => {
+  if (ev.target.id !== "prompt" && ev.target.id !== "ns-prompt") return;
+  const list = ev.clipboardData && ev.clipboardData.files;
+  if (list && list.length && takeFiles(ev.target, list)) ev.preventDefault(); // text pastes as text
+});
+$("app").addEventListener("dragover", (ev) => {
+  if (!ev.dataTransfer || ![...ev.dataTransfer.types].includes("Files")) return;
+  const box = ev.target.closest("#dock, #ns-form");
+  if (!box) return;
+  ev.preventDefault();
+  box.classList.add("dropping");
+});
+$("app").addEventListener("dragleave", (ev) => {
+  const box = ev.target.closest && ev.target.closest(".dropping");
+  if (box && !box.contains(ev.relatedTarget)) box.classList.remove("dropping");
+});
+$("app").addEventListener("drop", (ev) => {
+  const box = ev.target.closest("#dock, #ns-form");
+  if (!box || !ev.dataTransfer || !ev.dataTransfer.files.length) return;
+  ev.preventDefault();
+  box.classList.remove("dropping");
+  takeFiles(ev.target, ev.dataTransfer.files);
+});
+
 $("app").addEventListener("compositionstart", () => (composing = true));
 $("app").addEventListener("compositionend", () => {
   composing = false;
