@@ -234,8 +234,8 @@ When a session runs in a [herdr](https://herdr.dev) pane, the page can act on it
 - **A reply**, with files: a photo from the phone, a log, a spec. Files go into
   `.agent-deck/uploads/` in the session's repository; a `.gitignore` inside that folder keeps
   git from seeing them, and the prompt lists their paths.
-- **One-tap replies** for a session whose turn it is ("Continue", "Commit your changes" …; in
-  Japanese for a Japanese browser). You can change them.
+- **One-tap replies**, if you add some (the sliders in the reply box): a tap sends one at once.
+  There are none to start with.
 - **Stop** for a working session (`Esc`).
 - **Model and effort**: a Claude Code session switches them with its own `/model` and `/effort`.
 - **Go to its pane** on this computer.

@@ -245,8 +245,6 @@ button.opt:hover { border-color: var(--accent); color: var(--accent); }
 .chip-btn { flex: none; border: 1px solid var(--line); background: transparent; border-radius: 999px; padding: 4px 12px; font-size: 13px; cursor: pointer; white-space: nowrap; }
 .chip-btn:hover { background: var(--hover); }
 .chip-btn.ghost { color: var(--muted); }
-.quick-row { display: flex; gap: 6px; align-items: center; margin-bottom: 8px; }
-.quick-row .quick { flex: 1; min-width: 0; margin-bottom: 0; }
 .tune-panel { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 0 0 8px; font-size: 12px; color: var(--muted); }
 .tune-panel .lbl { margin-left: 4px; }
 .screen { margin: 10px 0 0; padding: 10px 12px; background: var(--code-bg); border-radius: 8px; font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 28vh; overflow-y: auto; }
@@ -664,11 +662,10 @@ const toggle = (set, k) => (set.has(k) ? set.delete(k) : set.add(k));
 let comments = stored("comments", {}); // session → [{ file, header, excerpt, text }]
 let notifyOn = stored("notify", false) && typeof Notification !== "undefined" && Notification.permission === "granted";
 let tab = TABS.includes(stored("tab", "chat")) ? stored("tab", "chat") : "chat";
-/** One-tap replies above the reply box; yours to change. */
-const QUICK = /^ja\b/.test(navigator.language || "") ? ["続けて", "それで進めて", "コミットして", "テストを実行して"] : ["Continue", "Go ahead", "Commit your changes", "Run the tests"];
-let quick = stored("quick", QUICK);
+/** One-tap replies above the reply box: none until you add some (a tap sends at once). */
+let quick = stored("quick", []);
 let keysOpen = false; // the keypad and the screen, under a question with choices
-let tuneOpen = false; // the model, effort and replies under the one-tap replies
+let tuneOpen = false; // the model, effort and one-tap replies, above the reply box
 
 const headers = () => ({ "content-type": "application/json", "x-agent-deck": "1", ...(token && { "x-token": token }) });
 async function api(path, init = {}, again = false) {
@@ -1240,12 +1237,14 @@ function paintDock(e) {
     if (i.state === "your-turn" && !i.hold) {
       // Claude Code switches model and effort with its own commands.
       const switches = i.agent === "claude" ? `<span class="lbl">Model</span>${["fable", "opus", "sonnet", "haiku"].map((m) => `<button class="chip-btn" data-slash="/model ${m}">${m}</button>`).join("")}<span class="lbl">Effort</span>${EFFORTS.map((m) => `<button class="chip-btn" data-slash="/effort ${m}">${m}</button>`).join("")}` : "";
-      html += `<div class="quick-row"><div class="quick">${quick.map((q) => `<button class="chip-btn" data-quick="${esc(q)}">${esc(q)}</button>`).join("")}</div><button class="icon-btn" data-act="tune" aria-expanded="${tuneOpen}" aria-pressed="${tuneOpen}" aria-controls="tune-panel" title="More: ${i.agent === "claude" ? "its model and effort, " : ""}these replies" aria-label="More">${icon("tune")}</button></div><div class="tune-panel" id="tune-panel"${tuneOpen ? "" : " hidden"}>${switches}<button class="chip-btn ghost" data-act="edit-quick">Change these replies</button></div>`;
+      if (quick.length) html += `<div class="quick">${quick.map((q) => `<button class="chip-btn" data-quick="${esc(q)}">${esc(q)}</button>`).join("")}</div>`;
+      html += `<div class="tune-panel" id="tune-panel"${tuneOpen ? "" : " hidden"}>${switches}<button class="chip-btn ghost" data-act="edit-quick">${quick.length ? "Change one-tap replies" : "Add one-tap replies"}</button></div>`;
     }
+    const tune = i.state === "your-turn" && !i.hold ? `<button class="icon-btn" data-act="tune" aria-expanded="${tuneOpen}" aria-pressed="${tuneOpen}" aria-controls="tune-panel" title="${i.agent === "claude" ? "Model, effort and one-tap replies" : "One-tap replies"}" aria-label="${i.agent === "claude" ? "Model, effort and one-tap replies" : "One-tap replies"}">${icon("tune")}</button>` : "";
     const stop = i.state === "working" ? `<button class="icon-btn" data-key-press="esc" title="Stop it (Esc)" aria-label="Stop">${icon("stop")}</button>` : "";
     const files = attached.get(i.key) || [];
     if (files.length) html += `<div class="attached">${files.map((f, n) => `<span class="att" title="${esc(f.path)}"><span class="nm">${esc(f.name)}</span><button data-unattach="${n}" aria-label="Do not send ${esc(f.name)}">×</button></span>`).join("")}</div>`;
-    html += `<div class="composer"><button class="icon-btn" data-act="attach" title="Send files: photos, logs, documents" aria-label="Send files">${icon("plus", 20)}</button><input type="file" id="attach" multiple hidden><textarea id="prompt" rows="1" aria-label="Message to the session" placeholder="${i.state === "working" ? "Queue a message" : "Reply"}" title="Ctrl+Enter sends">${esc(drafts.get(i.key) || "")}</textarea>${stop}<button class="send-btn" data-act="prompt" title="Send (Ctrl+Enter)" aria-label="Send">${icon("send")}</button></div>`;
+    html += `<div class="composer"><button class="icon-btn" data-act="attach" title="Send files: photos, logs, documents" aria-label="Send files">${icon("plus", 20)}</button><input type="file" id="attach" multiple hidden>${tune}<textarea id="prompt" rows="1" aria-label="Message to the session" placeholder="${i.state === "working" ? "Queue a message" : "Reply"}" title="Ctrl+Enter sends">${esc(drafts.get(i.key) || "")}</textarea>${stop}<button class="send-btn" data-act="prompt" title="Send (Ctrl+Enter)" aria-label="Send">${icon("send")}</button></div>`;
     if (i.state === "working") html += `<p class="sub hint">It is working; your message waits in its queue.</p>`;
   } else if (i && !i.herdr && i.state !== "stale") {
     html += outsideHtml(i);
@@ -2283,7 +2282,7 @@ async function act(name, el) {
       el.setAttribute("aria-pressed", String(tuneOpen));
       $("tune-panel").hidden = !tuneOpen;
     } else if (name === "edit-quick") {
-      const v = window.prompt("One-tap replies, separated by |", quick.join(" | "));
+      const v = window.prompt("One-tap replies, separated by |. A tap sends one at once; leave it empty for none.", quick.join(" | "));
       if (v === null) return;
       quick = v.split("|").map((x) => x.trim()).filter(Boolean);
       store("quick", quick);

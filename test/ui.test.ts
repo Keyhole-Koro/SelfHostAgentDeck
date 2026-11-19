@@ -262,9 +262,12 @@ esac
     await page.fill("#prompt", "Open the PR");
     await page.click('[data-act="prompt"]');
     await until(() => herdrCalls().includes("agent prompt w1:p2 Open the PR"));
+    assert.equal(await page.locator("#dock [data-quick]").count(), 0, "no one-tap replies until you add some");
+    await page.click('#dock [data-act="tune"]');
+    page.once("dialog", (d) => void d.accept("続けて | Continue"));
+    await page.click('#dock [data-act="edit-quick"]');
     await page.click('#dock [data-quick="Continue"]');
     await until(() => herdrCalls().includes("agent prompt w1:p2 Continue"));
-    await page.click('#dock [data-act="tune"]');
     await page.click('#dock [data-slash="/model opus"]');
     await until(() => herdrCalls().includes("agent prompt w1:p2 /model opus"));
     await page.setInputFiles("#attach", { name: "shot.png", mimeType: "image/png", buffer: Buffer.from([0x89, 0x50, 0x4e, 0x47]) });
