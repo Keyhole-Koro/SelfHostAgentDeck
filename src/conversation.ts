@@ -27,6 +27,8 @@ export interface ChatMessage {
   path?: string;
   error?: boolean;
   truncated?: boolean;
+  /** Images in it (yours, or what a tool saw): "<line offset>:<n>", to fetch from /api/chat/image. */
+  images?: string[];
 }
 
 export interface ChatPage {
@@ -55,7 +57,7 @@ const MAX_TEXT = 20_000;
 /** Tool results bigger than this are not parsed: only their id and whether they failed. */
 const BIG_LINE = 256 * 1024;
 
-type Part = ChatMessage | { role: "result"; id: string; toolId: string; error: boolean; legacy?: boolean };
+type Part = ChatMessage | { role: "result"; id: string; toolId: string; error: boolean; legacy?: boolean; images?: string[] };
 type Tool = ChatMessage & { toolId?: string; legacy?: boolean };
 
 export function readChat(file: string, agent: Agent, opts: ChatOptions = {}): ChatPage {
@@ -102,6 +104,7 @@ function link(parts: Part[]): ChatMessage[] {
     if (p.role === "result") {
       const t = tools.get(p.toolId);
       if (t && p.error) t.error = true;
+      if (t && p.images) t.images = [...(t.images ?? []), ...p.images];
       continue;
     }
     const t = p as Tool;
@@ -216,6 +219,7 @@ interface ClaudeBlock {
   tool_use_id?: string;
   is_error?: boolean;
   content?: unknown;
+  source?: { type?: string; media_type?: string; data?: string };
 }
 
 interface ClaudeLineShape {
@@ -236,7 +240,10 @@ function claudeParts(raw: string, start: number, cwd?: string): Part[] {
   // Huge lines are tool output (file contents, images): keep only which call it answers.
   if (raw.length > BIG_LINE && raw.includes('"tool_result"')) {
     const toolId = /"tool_use_id":"([^"]+)"/.exec(raw)?.[1];
-    return toolId ? [{ role: "result", id: String(start), toolId, error: /"is_error":true/.test(raw) }] : [];
+    // Counted without parsing it: an image block opens so (in a string, its quotes would be escaped).
+    const count = raw.match(/"type":"image","source"/g)?.length ?? 0;
+    const images = Array.from({ length: count }, (_, n) => `${start}:${n}`);
+    return toolId ? [{ role: "result", id: String(start), toolId, error: /"is_error":true/.test(raw), ...(count && { images }) }] : [];
   }
   let line: ClaudeLineShape;
   try {
@@ -262,14 +269,25 @@ function claudeParts(raw: string, start: number, cwd?: string): Part[] {
     if (typeof content === "string") return userText(content, msg);
     if (!Array.isArray(content)) return [];
     const parts: Part[] = [];
+    // Numbered in the order claudeImages finds them.
+    let k = 0;
+    const ref = () => `${start}:${k++}`;
+    const yours: string[] = [];
     for (const b of content as ClaudeBlock[]) {
       if (b?.type === "text" && b.text) parts.push(...userText(b.text, msg));
-      else if (b?.type === "image") parts.push(msg({ role: "user", text: "[image]" }));
+      else if (b?.type === "image" && b.source) yours.push(ref());
       else if (b?.type === "tool_result" && b.tool_use_id) {
-        parts.push({ role: "result", id: id(), toolId: b.tool_use_id, error: b.is_error === true });
+        const seen = Array.isArray(b.content) ? (b.content as ClaudeBlock[]).filter((x) => x?.type === "image" && x.source).map(ref) : [];
+        parts.push({ role: "result", id: id(), toolId: b.tool_use_id, error: b.is_error === true, ...(seen.length && { images: seen }) });
         const text = textOf(b.content);
         if (/^User has answered your questions?/.test(text)) parts.push(msg({ role: "user", kind: "answer", text: answers(text) }));
       }
+    }
+    if (yours.length) {
+      // On what you wrote with them ("[Image #1] why is this cut off?"), or on their own.
+      const said = parts.filter((p): p is ChatMessage => p.role === "user" && !(p as ChatMessage).kind).pop();
+      if (said) said.images = yours;
+      else parts.push(msg({ role: "user", images: yours }));
     }
     return parts;
   }
@@ -412,7 +430,13 @@ function codexParts(raw: string, start: number, cwd?: string): Part[] {
         switch (item.type) {
           case "UserMessage": {
             const t = codexText(item.content).trim();
-            return t ? [msg({ role: "user", ...clip(t) })] : [];
+            const count = codexImages(e).length;
+            const images = Array.from({ length: count }, (_, n) => `${start}:${n}`);
+            return t || count ? [msg({ role: "user", ...(t && clip(t)), ...(count && { images }) })] : [];
+          }
+          case "ImageView": {
+            const path = str((item as { path?: unknown }).path).replace(/^file:\/\//, "");
+            return [msg({ role: "tool", tool: "View image", detail: shortPath(path, cwd), ...(path && { path, images: [`${start}:0`] }) })];
           }
           case "AgentMessage": {
             const t = (item.text ?? codexText(item.content)).trim();
@@ -460,12 +484,87 @@ function codexParts(raw: string, start: number, cwd?: string): Part[] {
       const detail = name === "apply_patch" ? patchFiles(str(p["input"] ?? p["arguments"])).join(", ") : codexCommand(name, p["input"] ?? p["arguments"]);
       return [{ ...msg({ role: "tool", tool: name === "exec" || name === "shell" || name === "exec_command" ? "Shell" : name, detail: oneLine(detail) }), legacy: true, ...(callId && { toolId: callId }) } as Tool];
     }
+    if ((type === "custom_tool_call_output" || type === "function_call_output") && callId) {
+      const count = codexImages(e).length;
+      return count ? [{ role: "result", id: id(), toolId: callId, error: false, images: Array.from({ length: count }, (_, n) => `${start}:${n}`) }] : [];
+    }
     if (type === "local_shell_call") {
       const action = (p["action"] ?? {}) as { command?: unknown };
       return [{ ...msg({ role: "tool", tool: "Shell", detail: oneLine(shellLine(action.command)) }), legacy: true } as Tool];
     }
   }
   return [];
+}
+
+// ------------------------------------------------------------ images
+
+/** An image a transcript line holds, or names on disk. */
+export type ChatImage = { type: string; data: string } | { path: string };
+
+/** Claude Code's images in a line, in order: yours, and those in tool results. */
+function claudeImages(line: ClaudeLineShape): ChatImage[] {
+  const out: ChatImage[] = [];
+  const take = (b: ClaudeBlock) => out.push({ type: b.source?.type === "base64" ? str(b.source.media_type) : "", data: str(b.source?.data) });
+  const content = line.message?.content;
+  if (!Array.isArray(content)) return out;
+  for (const b of content as ClaudeBlock[]) {
+    if (b?.type === "image" && b.source) take(b);
+    else if (b?.type === "tool_result" && Array.isArray(b.content)) for (const x of b.content as ClaudeBlock[]) if (x?.type === "image" && x.source) take(x);
+  }
+  return out;
+}
+
+/** Codex's images in a line: those you attached, one it viewed, or a tool's output. */
+function codexImages(e: { type?: string; payload?: Record<string, unknown> }): ChatImage[] {
+  const p = e.payload ?? {};
+  const fromUrl = (url: string): ChatImage => {
+    const m = /^data:([\w/+.-]+);base64,(.*)$/s.exec(url);
+    return m ? { type: m[1]!, data: m[2]! } : { type: "", data: "" };
+  };
+  const list = (items: unknown): ChatImage[] =>
+    Array.isArray(items)
+      ? (items as Record<string, unknown>[]).flatMap((c) => (c?.["type"] === "local_image" && typeof c["path"] === "string" ? [{ path: c["path"] }] : c?.["type"] === "input_image" ? [fromUrl(str(c["image_url"]))] : []))
+      : [];
+  if (e.type === "event_msg" && p["type"] === "item_completed") {
+    const item = (p["item"] ?? {}) as Record<string, unknown>;
+    if (item["type"] === "UserMessage") return list(item["content"]);
+    if (item["type"] === "ImageView" && typeof item["path"] === "string") return [{ path: item["path"].replace(/^file:\/\//, "") }];
+  }
+  if (e.type === "response_item" && (p["type"] === "custom_tool_call_output" || p["type"] === "function_call_output")) return list(p["output"]);
+  return [];
+}
+
+/** How big a line holding images may be to read it (screenshots make lines of megabytes). */
+const MAX_IMAGE_LINE = 64 * 1024 * 1024;
+
+/** The n-th image of the line at `at` in a transcript; undefined if `at` starts no line, or it has none. */
+export function chatImage(file: string, agent: Agent, at: number, n: number): ChatImage | undefined {
+  const fd = openSync(file, "r");
+  try {
+    const size = fstatSync(fd).size;
+    if (at < 0 || at >= size) return undefined;
+    if (at > 0) {
+      const b = Buffer.alloc(1);
+      readSync(fd, b, 0, 1, at - 1);
+      if (b[0] !== 0x0a) return undefined; // not where a line starts
+    }
+    const parts: Buffer[] = [];
+    for (let pos = at, read = 0; pos < size && read < MAX_IMAGE_LINE; ) {
+      const chunk = Buffer.alloc(Math.min(CHUNK * 4, size - pos));
+      readSync(fd, chunk, 0, chunk.length, pos);
+      const nl = chunk.indexOf(0x0a);
+      parts.push(nl >= 0 ? chunk.subarray(0, nl) : chunk);
+      if (nl >= 0) break;
+      pos += chunk.length;
+      read += chunk.length;
+    }
+    const line = JSON.parse(Buffer.concat(parts).toString("utf8"));
+    return (agent === "codex" ? codexImages(line) : claudeImages(line))[n];
+  } catch {
+    return undefined;
+  } finally {
+    closeSync(fd);
+  }
 }
 
 /** The files an apply_patch touches. */

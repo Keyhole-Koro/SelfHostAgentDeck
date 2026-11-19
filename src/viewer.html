@@ -332,6 +332,15 @@ pre.code.numbered code { counter-reset: ln; display: block; min-width: max-conte
 .ln::before { counter-increment: ln; content: counter(ln); position: absolute; left: 0; width: 3.2em; text-align: right; color: var(--faint); }
 .doc { max-width: 760px; }
 img.shot { max-width: 100%; height: auto; border-radius: 8px; border: 1px solid var(--line); }
+/* Images in the conversation: a fixed height, so the conversation does not jump as they come in. */
+.pics { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.msg.pics-row { margin-top: -4px; }
+.pic { padding: 0; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--hover); cursor: zoom-in; min-width: 96px; max-width: 100%; }
+.pic img { display: block; height: 160px; width: auto; max-width: 100%; object-fit: contain; }
+.pic.gone { cursor: default; padding: 8px 10px; min-width: 0; font-size: 12px; color: var(--muted); }
+.lightbox { position: fixed; inset: 0; z-index: 1000; background: rgba(0, 0, 0, 0.88); display: flex; align-items: center; justify-content: center; padding: 16px; cursor: zoom-out; }
+.lightbox[hidden] { display: none; }
+.lightbox img { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 6px; }
 
 /* ---------------------------------------------------------------- changes */
 .changes-head { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; margin-bottom: 14px; }
@@ -508,6 +517,7 @@ body.pip { height: auto; min-height: 100vh; overflow: auto; display: block; }
     </div></details>
   </div>
 </header>
+<div class="lightbox" id="lightbox" hidden role="dialog" aria-label="Image"><img alt=""></div>
 <div class="app" id="app">
   <nav id="nav" aria-label="Sessions"><div class="nav-empty">Looking for sessions…</div></nav>
   <main id="main">
@@ -1147,6 +1157,7 @@ function paintChat(scroll) {
   const height = box.scrollHeight;
   const top = box.scrollTop;
   $("chat-col").innerHTML = chatHtml();
+  loadPictures($("chat-col"));
   if (scroll === "bottom" || (scroll === "follow" && atEnd)) box.scrollTop = box.scrollHeight;
   else if (scroll === "keep") box.scrollTop = top + (box.scrollHeight - height);
 }
@@ -1165,6 +1176,9 @@ function chatHtml() {
   let lastAt = 0;
   const flush = (last) => {
     if (steps.length) html += stepsHtml(steps, last);
+    // What the tools saw (screenshots, images read) stays in view, outside the folded steps.
+    const seen = steps.flatMap((s) => s.images || []);
+    if (seen.length) html += `<div class="msg pics-row">${picsHtml(seen)}</div>`;
     steps = [];
   };
   for (const m of c.messages) {
@@ -1183,6 +1197,44 @@ function chatHtml() {
   return html;
 }
 
+/** Images of the conversation, as thumbnails; they load as they come into view. */
+function picsHtml(refs) {
+  return `<div class="pics">${refs.map((r) => `<button class="pic" data-pic aria-label="Open the image"><img alt="" data-ref="${esc(r)}"></button>`).join("")}</div>`;
+}
+
+const pictures = new Map(); // "<session> <ref>" → a blob URL ("" if it is gone), or the promise of one
+const picWatch = "IntersectionObserver" in window ? new IntersectionObserver((seen) => seen.forEach((e) => e.isIntersecting && (picWatch.unobserve(e.target), loadPicture(e.target))), { rootMargin: "600px" }) : null;
+
+function loadPictures(root) {
+  for (const img of root.querySelectorAll("img[data-ref]")) picWatch ? picWatch.observe(img) : loadPicture(img);
+}
+
+async function loadPicture(img) {
+  const key = chat.key;
+  const id = `${key} ${img.dataset.ref}`;
+  if (!pictures.has(id)) {
+    const got = fetch(`/api/chat/image?key=${encodeURIComponent(key)}&ref=${encodeURIComponent(img.dataset.ref)}`, { headers: headers(), credentials: "same-origin" })
+      .then((r) => (r.ok ? r.blob() : null))
+      .then((b) => (b ? URL.createObjectURL(b) : ""))
+      .catch(() => null); // offline: try again next time
+    pictures.set(id, got);
+    got.then((u) => (u === null ? pictures.delete(id) : pictures.set(id, u)));
+  }
+  const url = await pictures.get(id);
+  if (!img.isConnected) return;
+  if (url) img.src = url;
+  else if (url === "") img.parentElement.replaceWith(Object.assign(document.createElement("span"), { className: "pic gone", textContent: "Image no longer there" }));
+}
+
+function openPicture(img) {
+  if (!img || !img.src) return;
+  const box = $("lightbox");
+  box.querySelector("img").src = img.src;
+  box.hidden = false;
+}
+$("lightbox").addEventListener("click", () => ($("lightbox").hidden = true));
+document.addEventListener("keydown", (ev) => ev.key === "Escape" && !$("lightbox").hidden && (($("lightbox").hidden = true), ev.preventDefault()));
+
 function msgHtml(m) {
   const t = m.at ? ` title="${esc(new Date(m.at).toLocaleString())}"` : "";
   const cut = m.truncated ? `<div class="sub">… cut here; the rest is in the transcript.</div>` : "";
@@ -1190,7 +1242,7 @@ function msgHtml(m) {
     const text = m.text || "";
     const long = text.length > 700 || text.split("\n").length > 12;
     const body = m.kind === "command" || m.kind === "shell" ? `<code>${esc(text)}</code>` : linkify(text);
-    return `<div class="msg me${m.kind ? " " + esc(m.kind) : ""}"${t}><div class="bubble${long ? " long" : ""}">${body}${cut}</div>${long ? '<button class="linkish more-btn" data-act="expand">Show all</button>' : ""}</div>`;
+    return `<div class="msg me${m.kind ? " " + esc(m.kind) : ""}"${t}><div class="bubble${long ? " long" : ""}">${body}${cut}${m.images ? picsHtml(m.images) : ""}</div>${long ? '<button class="linkish more-btn" data-act="expand">Show all</button>' : ""}</div>`;
   }
   if (m.role === "assistant") return `<div class="msg ai"${t}><div class="md">${markdown(m.text)}</div>${cut}</div>`;
   if (m.kind === "recap") return `<div class="recap"${t}><div class="label">While you were away</div><div class="md">${markdown(m.text)}</div></div>`;
@@ -2517,6 +2569,8 @@ document.addEventListener("keydown", (ev) => {
 $("app").addEventListener("click", (ev) => {
   const t = ev.target;
   if (t.closest("#nav")) return;
+  const pic = t.closest("[data-pic]");
+  if (pic) return openPicture(pic.querySelector("img"));
   const copy = t.closest("[data-copy]");
   if (copy) {
     navigator.clipboard?.writeText(copy.dataset.copy).then(() => ((copy.textContent = "Copied"), setTimeout(() => (copy.textContent = "Copy"), 1200)));

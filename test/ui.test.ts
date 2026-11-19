@@ -124,6 +124,8 @@ describe("page", { skip: (!chromium && "no browser") || (process.platform !== "l
     writeFileSync(join(repo, ".env"), "TOKEN=secret");
     const chatty: object[] = [{ type: "ai-title", aiTitle: "Long talk" }];
     for (let n = 0; n < 45; n++) chatty.push({ type: "user", message: { content: `question ${n}` } }, { type: "assistant", message: { content: [{ type: "text", text: `answer ${n}` }] } });
+    const dot = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="; // 1×1 PNG
+    chatty.push({ type: "user", message: { content: [{ type: "image", source: { type: "base64", media_type: "image/png", data: dot } }, { type: "text", text: "[Image #1] look at this" }] } });
     chatty.push(tool("t1", "Bash", { command: "npm test" }), { type: "user", message: { content: [{ type: "tool_result", tool_use_id: "t1", content: "1 failing", is_error: true }] } });
     chatty.push({ type: "assistant", message: { content: [{ type: "text", text: 'See `notes.md` for **details**.\n\n<img src=x onerror="window.__xss=1">' }] } });
     transcript("chatty", chatty);
@@ -353,8 +355,15 @@ esac
     assert.match(await text(), /question 44[\s\S]*answer 44[\s\S]*1 step[\s\S]*Bash[\s\S]*1 failed[\s\S]*See notes\.md for details\./);
     assert.doesNotMatch(await text(), /question 0\b/, "only the latest page at first");
     assert.match(await page.locator("#chat .msg.ai").last().innerHTML(), /<strong>details<\/strong>[\s\S]*&lt;img src=x/);
-    assert.equal(await page.locator("#chat img").count(), 0);
+    assert.equal(await page.locator("#chat .msg.ai img").count(), 0);
     assert.equal(await page.evaluate(() => (window as unknown as { __xss?: number }).__xss), undefined);
+    // The image you sent, in your message; a tap shows it large, a tap closes it.
+    const pic = page.locator("#chat .msg.me .pic img");
+    await until(async () => (await pic.evaluate((i: HTMLImageElement) => i.complete && i.naturalWidth)) === 1);
+    await page.locator("#chat .msg.me .pic").click();
+    assert.equal(await page.locator("#lightbox").isVisible(), true);
+    await page.locator("#lightbox").click();
+    assert.equal(await page.locator("#lightbox").isVisible(), false);
     for (let n = 0; n < 6 && !(await page.locator("#chat .start").count()); n++) {
       await page.locator('[data-act="earlier"]').click().catch(() => {});
       await page.waitForTimeout(300);

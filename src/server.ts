@@ -1,15 +1,15 @@
 import { randomBytes } from "node:crypto";
-import { mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { Worker } from "node:worker_threads";
 import { homedir } from "node:os";
-import { basename, join } from "node:path";
+import { basename, extname, join } from "node:path";
 import { renderSVG } from "uqr";
 import { appendActivity, changes, readActivity, snapshot, type ActivityEvent, type Snapshot } from "./activity.ts";
 import { ciFailure } from "./ci.ts";
 import { cleanup } from "./cleanup.ts";
 import { findConflicts } from "./conflicts.ts";
-import { readChat } from "./conversation.ts";
+import { chatImage, readChat } from "./conversation.ts";
 import { parseSince } from "./core.ts";
 import { FileError, filesRoot, image, look } from "./files.ts";
 import { icon } from "./icon.ts";
@@ -88,6 +88,8 @@ export interface Served {
 }
 
 const PAGE = join(import.meta.dirname, "viewer.html");
+/** Images the conversation may show (no SVG: it can carry scripts). */
+const CHAT_IMAGES: Record<string, string> = { ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp" };
 /** The page's Markdown renderer, inlined into its script (one nonce, one request). */
 const MARKDOWN = join(import.meta.dirname, "markdown.js");
 const WORKER = join(import.meta.dirname, "sw.js");
@@ -577,6 +579,27 @@ export async function serve(opts: ServeOptions): Promise<Served> {
       if (!file) return json(res, 200, { messages: [], end: 0 });
       const limit = offset(url, "limit");
       return json(res, 200, readChat(file, item.agent, { before: offset(url, "before"), after: offset(url, "after"), ...(limit && { limit: Math.min(limit, 100) }), ...(item.cwd && { cwd: item.cwd }) }));
+    }
+    if (req.method === "GET" && url.pathname === "/api/chat/image") {
+      const item = listed(url.searchParams.get("key"));
+      const file = transcriptOf(item);
+      const [at, n] = (url.searchParams.get("ref") ?? "").split(":").map(Number);
+      if (!file || !Number.isSafeInteger(at) || !Number.isSafeInteger(n)) throw new FileError("No such image.", 404);
+      const img = chatImage(file, item.agent, at!, n!);
+      let type = "";
+      let data: Buffer | undefined;
+      if (img && "data" in img) [type, data] = [img.type, Buffer.from(img.data, "base64")];
+      else if (img) {
+        // A file you attached (Codex keeps only its path): an image, of a size to show.
+        type = CHAT_IMAGES[extname(img.path).toLowerCase()] ?? "";
+        const st = type ? statSync(img.path, { throwIfNoEntry: false }) : undefined;
+        data = st?.isFile() && st.size <= 20 * 1024 * 1024 ? readFileSync(img.path) : undefined;
+        if (!data) throw new FileError("That image is no longer there.", 404);
+      }
+      if (!data || !Object.values(CHAT_IMAGES).includes(type)) throw new FileError("No such image.", 404);
+      // A line of a transcript never changes, so neither does its image.
+      res.writeHead(200, { "content-type": type, "cache-control": "private, max-age=604800, immutable", "x-content-type-options": "nosniff", "content-security-policy": "default-src 'none'; sandbox" });
+      return void res.end(data);
     }
     if (req.method === "GET" && (url.pathname === "/api/files" || url.pathname === "/api/files/image")) {
       const item = listed(url.searchParams.get("key"));

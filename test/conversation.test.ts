@@ -3,7 +3,7 @@ import { appendFileSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
-import { readChat, type ChatMessage } from "../src/conversation.ts";
+import { chatImage, readChat, type ChatMessage } from "../src/conversation.ts";
 
 const dir = mkdtempSync(join(tmpdir(), "adv-chat-"));
 let n = 0;
@@ -76,6 +76,36 @@ describe("Claude Code transcripts", () => {
     assert.equal(step!.error, true);
   });
 
+  it("points at the images you sent and those its tools saw, to fetch one at a time", () => {
+    const png = (b: string) => ({ type: "image", source: { type: "base64", media_type: "image/png", data: Buffer.from(b).toString("base64") } });
+    const big = { type: "image", source: { type: "base64", media_type: "image/jpeg", data: Buffer.from("J".repeat(300_000)).toString("base64") } };
+    const f = file([
+      user([png("mine"), text("[Image #1] why is this cut off?")]),
+      user([png("alone")]),
+      assistant(use("r1", "Read", { file_path: "/w/shot.png" })),
+      // Claude Code keeps the image again under toolUseResult: not a second one.
+      { ...result("r1", [png("read")]), toolUseResult: { type: "image", file: { base64: "x", type: "image/png" } } },
+      assistant(use("s1", "mcp__browser__screenshot", {})),
+      { ...result("s1", [text("a screenshot"), big]), toolUseResult: { type: "image", file: { base64: "y" } } },
+    ]);
+    const m = readChat(f, "claude").messages;
+    assert.deepEqual(m.map((x) => [x.role, x.text ?? x.tool, x.images?.length ?? 0]), [
+      ["user", "[Image #1] why is this cut off?", 1],
+      ["user", undefined, 1],
+      ["tool", "Read", 1],
+      ["tool", "browser · screenshot", 1],
+    ]);
+    const get = (ref: string) => {
+      const [at, n] = ref.split(":").map(Number);
+      const img = chatImage(f, "claude", at!, n!);
+      return img && "data" in img ? `${img.type} ${Buffer.from(img.data, "base64").toString().slice(0, 5)}` : img;
+    };
+    assert.deepEqual(m.map((x) => get(x.images![0]!)), ["image/png mine", "image/png alone", "image/png read", "image/jpeg JJJJJ"], "the big line too");
+    const at = Number(m[0]!.images![0]!.split(":")[0]);
+    assert.equal(chatImage(f, "claude", at + 1, 0), undefined, "only where a line starts");
+    assert.equal(chatImage(f, "claude", at, 5), undefined);
+  });
+
   it("pages back to the start without gaps or repeats", () => {
     const lines: object[] = [];
     for (let i = 0; i < 100; i++) lines.push(user(`question ${i}`), assistant(use(`t${i}`, "Bash", { command: `step ${i}` })), result(`t${i}`, "ok"), assistant(text(`answer ${i}`)));
@@ -130,6 +160,31 @@ describe("Codex rollouts", () => {
       "assistant | In src/schema.ts.",
       "event | interrupted | Interrupted",
     ]);
+  });
+
+  it("points at the images you attached, one it viewed, and a tool's", () => {
+    const url = (b: string) => `data:image/png;base64,${Buffer.from(b).toString("base64")}`;
+    const f = file([
+      ev("event_msg", { type: "item_completed", item: { type: "UserMessage", content: [{ type: "local_image", path: "/home/me/Pictures/shot.png" }, { type: "text", text: "This looks off [Image #1]" }] } }),
+      ev("event_msg", { type: "item_completed", item: { type: "ImageView", path: "file:///w/out.png" } }),
+      ev("response_item", { type: "function_call", name: "shell", call_id: "c9", arguments: "{}" }),
+      ev("response_item", { type: "function_call_output", call_id: "c9", output: [{ type: "input_text", text: "done" }, { type: "input_image", image_url: url("tool") }] }),
+    ]);
+    const m = readChat(f, "codex", { cwd: "/w" }).messages;
+    assert.deepEqual(m.map((x) => [brief(x), x.images?.length ?? 0]), [
+      ["user | This looks off [Image #1]", 1],
+      ["tool | View image | out.png", 1],
+    ]);
+    const get = (ref: string) => {
+      const [at, n] = ref.split(":").map(Number);
+      return chatImage(f, "codex", at!, n!);
+    };
+    assert.deepEqual(get(m[0]!.images![0]!), { path: "/home/me/Pictures/shot.png" });
+    assert.deepEqual(get(m[1]!.images![0]!), { path: "/w/out.png" });
+    const old = file([ev("response_item", { type: "function_call", name: "shell", call_id: "c9", arguments: "{}" }), ev("response_item", { type: "function_call_output", call_id: "c9", output: [{ type: "input_image", image_url: url("tool") }] })]);
+    const [step] = readChat(old, "codex").messages;
+    const img = chatImage(old, "codex", Number(step!.images![0]!.split(":")[0]), 0);
+    assert.deepEqual(img, { type: "image/png", data: Buffer.from("tool").toString("base64") }, "an older rollout's tool output");
   });
 
   it("reads older rollouts: messages as events, tools as response items", () => {
