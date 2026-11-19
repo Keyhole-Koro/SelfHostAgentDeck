@@ -276,7 +276,10 @@ esac
     await api.post("/api/herdr/keys", { key: `codex:${codexId}`, keys: ["1", "enter"] });
     await assert.rejects(api.post("/api/herdr/keys", { key: "claude:sa", keys: ["ctrl+d"] }), /Keys not allowed: ctrl\+d/);
     await assert.rejects(api.post("/api/herdr/prompt", { key: "claude:sa", text: "  " }), /Write a prompt/);
-    assert.deepEqual(await api.get(`/api/herdr/screen?key=${encodeURIComponent(`codex:${codexId}`)}`), { text: "Allow this command?\n> 1. Yes\n  2. No" });
+    assert.deepEqual(await api.get(`/api/herdr/screen?key=${encodeURIComponent(`codex:${codexId}`)}`), {
+      text: "Allow this command?\n> 1. Yes\n  2. No",
+      prompt: { question: "Allow this command?", choices: [{ key: "1", label: "Yes", selected: true }, { key: "2", label: "No" }] },
+    });
     const calls = readFileSync(log, "utf8").split("\n").filter((l) => !l.includes("agent list") && l);
     assert.deepEqual(calls, [`${socket} agent focus w1:p9`, `${socket} agent prompt w1:p9 Ship it`, `${socket} agent send-keys w1:p4 1 enter`, `${socket} agent read w1:p4 --source visible`]);
   });
