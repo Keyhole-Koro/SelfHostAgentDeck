@@ -83,6 +83,8 @@ let env: NodeJS.ProcessEnv;
 let server: ChildProcess;
 let port = 0;
 let origin = "";
+/** The page on this computer, with its token. */
+let localUrl = "";
 
 function cli(...args: string[]): string {
   return execFileSync(process.execPath, [CLI, ...args], { cwd: home, env, encoding: "utf8" });
@@ -151,10 +153,12 @@ before(async () => {
   port = 47_000 + Math.floor(Math.random() * 2000);
   origin = `http://localhost:${port}`;
   server = spawn(process.execPath, [CLI, "inbox", "--view", "--port", "0", "--no-herdr", "--remote", origin, "--remote-port", String(port)], { cwd: home, env });
+  let out = "";
   await new Promise<void>((resolve, reject) => {
-    server.stdout!.on("data", (d: Buffer) => String(d).includes("Remote:") && resolve());
+    server.stdout!.on("data", (d: Buffer) => (out += String(d)).includes("Remote:") && resolve());
     server.on("exit", (code) => reject(new Error(`view exited ${code}`)));
   });
+  localUrl = /http:\/\/127\.0\.0\.1\S+/.exec(out)![0];
 });
 
 after(() => server?.kill());
@@ -318,5 +322,32 @@ describe("remote: closed doors", () => {
     const old = await act(`${legacy}; agent_deck_confirmed=${value(legacy)}`);
     assert.equal(old.status, 403, "but does not stand in for the passkey check");
     assert.equal(old.json.confirm, true);
+  });
+
+  it("removes another device only within minutes of a passkey check, as any action", async () => {
+    const passkey = await softPasskey();
+    const own = (await pairDevice(passkey, "Fifth phone")).split("; ").find((c) => c.startsWith("agent_deck_session="))!;
+    const spare = await softPasskey();
+    await pairDevice(spare, "Spare tablet");
+    const devices = async () => (await call("GET", "/api/remote", { cookie: own, headers: page() })).json.devices.map((d: { label: string }) => d.label);
+    const blocked = await call("POST", "/api/remote/revoke", { body: { id: spare.id }, cookie: own, headers: page() });
+    assert.equal(blocked.status, 403, "the session cookie alone cannot remove a device");
+    assert.equal(blocked.json.confirm, true);
+    assert.ok((await devices()).includes("Spare tablet"));
+    const asked = await call("POST", "/auth/confirm/options", { cookie: own, headers: page() });
+    const ok = await call("POST", "/auth/confirm/verify", { body: { response: await passkey.authenticate(asked.json, origin) }, cookie: jar([...asked.cookies, own]), headers: page() });
+    assert.equal(ok.status, 200, ok.body);
+    const removed = await call("POST", "/api/remote/revoke", { body: { id: spare.id }, cookie: jar([own, ...ok.cookies]), headers: page() });
+    assert.equal(removed.status, 200, removed.body);
+    assert.equal(removed.json.removed, "Spare tablet");
+    assert.ok(!(await devices()).includes("Spare tablet"));
+
+    // The page on this computer removes devices as before, with its token and no passkey.
+    const laptop = await softPasskey();
+    await pairDevice(laptop, "Old laptop");
+    const { origin: local, hash } = new URL(localUrl);
+    const res = await fetch(`${local}/api/remote/revoke`, { method: "POST", headers: { "x-token": new URLSearchParams(hash.slice(1)).get("t")!, "content-type": "application/json" }, body: JSON.stringify({ id: laptop.id }) });
+    assert.equal(res.status, 200);
+    assert.deepEqual(await res.json(), { removed: "Old laptop" });
   });
 });
