@@ -12,6 +12,8 @@ import { after, before, describe, it } from "node:test";
  */
 
 const CLI = join(import.meta.dirname, "..", "src", "cli.ts");
+/** The page's own helper, called from page.evaluate. */
+declare const post: (path: string, body: object) => Promise<unknown>;
 
 let chromium: typeof import("playwright").chromium | undefined;
 try {
@@ -48,7 +50,7 @@ describe("remote page", { skip: !chromium && "no browser" }, () => {
     browser = await chromium!.launch();
     page = await browser.newPage({ viewport: { width: 390, height: 844 } }); // a phone
     page.on("pageerror", (e) => errors.push(e.message));
-    page.on("console", (m) => m.type() === "error" && !/401/.test(m.text()) && errors.push(m.text()));
+    page.on("console", (m) => m.type() === "error" && !/status of 4\d\d/.test(m.text()) && errors.push(m.text()));
     const cdp = await page.context().newCDPSession(page);
     await cdp.send("WebAuthn.enable");
     await cdp.send("WebAuthn.addVirtualAuthenticator", { options: { protocol: "ctap2", transport: "internal", hasResidentKey: true, hasUserVerification: true, isUserVerified: true, automaticPresenceSimulation: true } });
@@ -78,6 +80,17 @@ describe("remote page", { skip: !chromium && "no browser" }, () => {
     await page.click('[data-passkey="login"]');
     await page.waitForURL(`${origin}/`);
     await page.waitForSelector('.session[data-key="claude:s1"]');
+  });
+
+  it("asks for the passkey before acting from the phone, then sends", async () => {
+    const all = await page.context().cookies();
+    await page.context().clearCookies();
+    await page.context().addCookies(all.filter((c) => c.name !== "agent_diff_confirmed"));
+    const sent = page.evaluate(() => post("/api/herdr/prompt", { key: "claude:s1", text: "hi" }).then(() => "sent", (e: Error) => e.message));
+    await page.waitForSelector("#confirm[open]");
+    await page.click("#confirm-go");
+    assert.match(await sent, /herdr pane/, "past the check, it fails on herdr (off here) instead");
+    assert.equal(await page.locator("#confirm[open]").count(), 0);
   });
 
   it("shows a QR code to add a phone, on this computer's page only", async () => {

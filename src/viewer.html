@@ -328,6 +328,12 @@ table.clean th { font-size: 12px; color: var(--muted); font-weight: 600; }
 .pair .qr svg { width: 100%; height: 100%; }
 .pair p { margin: 0 0 8px; font-size: 14px; }
 
+/* ---------------------------------------------------------------- the passkey check before acting */
+dialog { border: 1px solid var(--line); border-radius: 14px; background: var(--bg); color: var(--text); padding: 20px; width: min(92vw, 380px); }
+dialog::backdrop { background: rgba(0, 0, 0, .4); }
+dialog h2 { margin: 0 0 6px; font-size: 17px; }
+dialog p { margin: 0 0 14px; color: var(--muted); font-size: 14px; }
+
 /* ---------------------------------------------------------------- touch */
 @media (pointer: coarse) {
   .btn, .tbtn { min-height: 36px; }
@@ -393,8 +399,15 @@ table.clean th { font-size: 12px; color: var(--muted); font-weight: 600; }
   </main>
   <aside id="side" aria-label="About this session"><div id="info"></div></aside>
 </div>
+<dialog id="confirm" aria-labelledby="confirm-title">
+  <h2 id="confirm-title">Is it you?</h2>
+  <p>From another device, sending to a session needs this device's passkey every few minutes.</p>
+  <div class="actions"><button class="btn primary" id="confirm-go">Use the passkey</button><button class="btn" id="confirm-cancel">Cancel</button></div>
+  <p class="note error" id="confirm-error"></p>
+</dialog>
 <script>
 /*@markdown*/
+/*@passkey*/
 
 const params = new URLSearchParams(location.hash.slice(1));
 const token = params.get("t") || "";
@@ -477,15 +490,59 @@ let quick = stored("quick", QUICK);
 let keysOpen = false; // the keypad and the screen, under a question with choices
 
 const headers = () => ({ "content-type": "application/json", "x-agent-diff": "1", ...(token && { "x-token": token }) });
-async function api(path, init = {}) {
-  const res = await fetch(path, { ...init, headers: headers(), credentials: "same-origin" });
+async function api(path, init = {}, again = false) {
+  const res = await fetch(path, { ...init, headers: { ...headers(), ...init.headers }, credentials: "same-origin" });
   if (res.status === 401 && mode === "remote") {
     location.assign("/login"); // the session ended: sign in again
     throw new Error("Signing in again…");
   }
   const body = await res.json();
+  // Acting from another device: check its passkey, then send again.
+  if (res.status === 403 && body.confirm && !again) {
+    await confirmIdentity();
+    return api(path, init, true);
+  }
   if (!res.ok) throw new Error(body.error || res.statusText);
   return body;
+}
+
+const okJson = async (res) => {
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(j.error || res.statusText);
+  return j;
+};
+let confirming = null; // the check in progress, shared by every request waiting on it
+
+/** Asks for this device's passkey; a button starts it, since browsers want a tap for passkeys. */
+function confirmIdentity() {
+  if (confirming) return confirming;
+  const dialog = $("confirm");
+  confirming = new Promise((resolve, reject) => {
+    $("confirm-error").textContent = "";
+    dialog.showModal();
+    const done = (settle, value) => {
+      dialog.close();
+      confirming = null;
+      $("confirm-go").onclick = $("confirm-cancel").onclick = null;
+      settle(value);
+    };
+    $("confirm-cancel").onclick = () => done(reject, new Error("Not sent: the passkey check was cancelled."));
+    $("confirm-go").onclick = async () => {
+      $("confirm-go").disabled = true;
+      try {
+        const send = (path, body) => fetch(path, { method: "POST", headers: headers(), credentials: "same-origin", body: JSON.stringify(body) }).then(okJson);
+        const options = await send("/auth/confirm/options", {});
+        const cred = await navigator.credentials.get({ publicKey: request(options) });
+        await send("/auth/confirm/verify", { response: authentication(cred) });
+        done(resolve);
+      } catch (e) {
+        $("confirm-error").textContent = e && e.name === "NotAllowedError" ? "Cancelled, or no passkey here. Try again." : e.message;
+      } finally {
+        $("confirm-go").disabled = false;
+      }
+    };
+  });
+  return confirming;
 }
 const post = (path, body) => api(path, { method: "POST", body: JSON.stringify(body) });
 
