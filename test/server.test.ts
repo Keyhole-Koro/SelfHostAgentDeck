@@ -332,6 +332,7 @@ esac
     await api.post("/api/herdr/prompt", { key: "claude:sa", text: "Ship it" });
     await api.post("/api/herdr/keys", { key: `codex:${codexId}`, keys: ["1", "enter"] });
     await assert.rejects(api.post("/api/herdr/keys", { key: "claude:sa", keys: ["ctrl+d"] }), /Keys not allowed: ctrl\+d/);
+    await assert.rejects(api.post("/api/start", { dir: "/etc", agent: "claude", prompt: "x" }), /404 Not a folder of a listed session/);
     await assert.rejects(api.post("/api/herdr/prompt", { key: "claude:sa", text: "  " }), /Write a prompt/);
     assert.deepEqual(await api.get(`/api/herdr/screen?key=${encodeURIComponent(`codex:${codexId}`)}`), {
       text: "Allow this command?\n> 1. Yes\n  2. No",
@@ -346,6 +347,7 @@ esac
     const r = await api.get("/api/inbox");
     assert.ok(r.items.every((i: { herdr?: object }) => !i.herdr));
     await assert.rejects(api.post("/api/herdr/focus", { key: "claude:sa" }), /does not run in a herdr pane/);
+    await assert.rejects(api.post("/api/start", { dir: repo, agent: "claude", prompt: "x" }), /herdr is off/);
     assert.equal(existsSync(log), false, "herdr was never run");
   });
 });

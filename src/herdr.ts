@@ -26,6 +26,8 @@ export interface HerdrAgent {
   /** The agent's working directory and its terminal's title (Codex puts the thread's name there). */
   cwd?: string;
   title?: string;
+  /** The herdr workspace its pane is in. */
+  workspace?: string;
 }
 
 interface AgentInfo {
@@ -37,6 +39,7 @@ interface AgentInfo {
   cwd?: string | null;
   foreground_cwd?: string | null;
   terminal_title_stripped?: string | null;
+  workspace_id?: string | null;
 }
 
 const bin = () => process.env["AGENT_DIFF_HERDR"] || "herdr";
@@ -100,6 +103,7 @@ function toAgent(a: AgentInfo, socket: string): HerdrAgent {
   const cwd = a.foreground_cwd ?? a.cwd;
   if (cwd) agent.cwd = cwd;
   if (a.terminal_title_stripped) agent.title = a.terminal_title_stripped;
+  if (a.workspace_id) agent.workspace = a.workspace_id;
   return agent;
 }
 

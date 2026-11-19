@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { Worker } from "node:worker_threads";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { renderSVG } from "uqr";
 import { appendActivity, changes, readActivity, snapshot, type ActivityEvent, type Snapshot } from "./activity.ts";
 import { ciFailure } from "./ci.ts";
@@ -12,6 +12,8 @@ import { readChat } from "./conversation.ts";
 import { parseSince } from "./core.ts";
 import { FileError, filesRoot, image, look } from "./files.ts";
 import { icon } from "./icon.ts";
+import { codexHome } from "./inbox.ts";
+import { EFFORTS, startSession, type StartRequest } from "./start.ts";
 import { repoInfo } from "./git.ts";
 import { focus, herdrAgents, matchPanes, prompt, screen, sendKeys, type HerdrAgent } from "./herdr.ts";
 import { applyHolds, hold, parseUntil, release, stateDir } from "./holds.ts";
@@ -203,6 +205,16 @@ export function attributionWorker(idleMs = WORKER_IDLE_MS): ((req: Ask) => Promi
     });
   };
   return Object.assign(ask, { running: () => worker !== undefined });
+}
+
+/** Codex's configured model, to suggest. */
+function codexModels(): string[] {
+  try {
+    const m = /^\s*model\s*=\s*"([^"]+)"/m.exec(readFileSync(join(codexHome(), "config.toml"), "utf8"));
+    return m ? [m[1]!] : [];
+  } catch {
+    return [];
+  }
 }
 
 function rangeOf(url: URL): { base?: string; since?: number } {
@@ -512,6 +524,21 @@ export async function serve(opts: ServeOptions): Promise<Served> {
       const pr = url.searchParams.get("url") ?? "";
       if (!(item.prs ?? []).some((p) => p.url === pr)) throw new FileError("Not a pull request of this session.", 404);
       return json(res, 200, await ciFailure(pr));
+    }
+    if (req.method === "GET" && url.pathname === "/api/projects") {
+      const projects = [...projectRoots()].sort((a, b) => basename(a).localeCompare(basename(b))).map((dir) => ({ dir, name: basename(dir), repo: !!placeOf(dir).repo }));
+      return json(res, 200, { projects, models: { claude: ["fable", "opus", "sonnet", "haiku"], codex: codexModels() }, efforts: EFFORTS, herdr: opts.herdr !== false });
+    }
+    if (req.method === "POST" && url.pathname === "/api/start") {
+      if (opts.herdr === false) return json(res, 400, { error: "herdr is off (--no-herdr): sessions cannot be started from the page." });
+      const b = await body(req);
+      const dir = String(b["dir"] ?? "");
+      if (!projectRoots().has(dir)) throw new FileError("Not a folder of a listed session.", 404);
+      const opt = (k: string) => (typeof b[k] === "string" && (b[k] as string).trim() ? { [k]: (b[k] as string).trim() } : {});
+      const start: StartRequest = { dir, agent: b["agent"] === "codex" ? "codex" : "claude", prompt: String(b["prompt"] ?? ""), ...opt("model"), ...opt("effort"), ...opt("branch"), files: Array.isArray(b["files"]) ? b["files"].map(String) : [] };
+      const started = await startSession(start);
+      log("started a session", started.dir, start.prompt.slice(0, 300));
+      return json(res, 200, started);
     }
     if (req.method === "POST" && url.pathname === "/api/upload") {
       const project = url.searchParams.get("project");
