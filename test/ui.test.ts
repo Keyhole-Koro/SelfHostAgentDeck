@@ -35,11 +35,11 @@ describe("page", { skip: (!chromium && "no browser") || (process.platform !== "l
   let page: import("playwright").Page;
   const errors: string[] = [];
   /** Another page on the same server: a phone, a tablet, the dark. */
-  const another = async (opts: import("playwright").BrowserContextOptions) => {
+  const another = async (opts: import("playwright").BrowserContextOptions, hash = "") => {
     const p = await browser.newPage(opts);
     p.on("pageerror", (e) => errors.push(e.message));
     p.on("console", (m) => m.type() === "error" && errors.push(m.text()));
-    await p.goto(url);
+    await p.goto(url + hash);
     await p.waitForSelector(".session");
     return p;
   };
@@ -261,7 +261,8 @@ esac
   });
 
   it("fits a phone: the list, then one session with its reply box, and Back", async () => {
-    const phone = await another({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+    // Picked already (from the URL), so its reply box is first drawn while the list hides it.
+    const phone = await another({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true }, "&s=claude:chatty");
     assert.equal(await phone.evaluate(() => document.body.dataset.view), "list");
     assert.equal(await phone.locator("main").isVisible(), false);
     await phone.click('.session[data-key="claude:chatty"]');
@@ -269,6 +270,7 @@ esac
     assert.equal(await phone.locator("#nav").isVisible(), false);
     const box = (await phone.locator("#prompt").boundingBox())!;
     assert.ok(box.y > 600 && box.y + box.height <= 844, `the reply box sits at the bottom (${box.y}+${box.height})`);
+    assert.ok(box.height >= 20, `and is a line tall, though the page was drawn while it was hidden (${box.height})`);
     assert.equal(await phone.evaluate(() => document.documentElement.scrollWidth), 390, "no sideways scrolling");
     await phone.click('[data-tab="details"]');
     assert.ok(await phone.locator("#pane-details #info").isVisible());

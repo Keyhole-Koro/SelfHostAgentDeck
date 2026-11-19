@@ -906,7 +906,7 @@ function paintDock(e) {
   let html = "";
   if (i && i.state === "needs-answer") html += askHtml(i);
   if (i && i.herdr && i.state !== "needs-answer") {
-    html += `<div class="composer"><textarea id="prompt" rows="1" aria-label="Message to the session" placeholder="${i.state === "working" ? "Queue a message for" : "Reply to"} ${esc(nameOf(i))}" title="Ctrl+Enter sends">${esc(drafts.get(i.key) || "")}</textarea><button class="btn primary" data-act="prompt">Send</button></div>`;
+    html += `<div class="composer"><textarea id="prompt" rows="1" aria-label="Message to the session" placeholder="${i.state === "working" ? "Queue a message" : "Reply"}" title="Ctrl+Enter sends">${esc(drafts.get(i.key) || "")}</textarea><button class="btn primary" data-act="prompt">Send</button></div>`;
     if (i.state === "working") html += `<p class="sub hint">It is working; your message waits in its queue.</p>`;
   } else if (i && !i.herdr && (waiting(i) || i.state === "needs-answer")) {
     html += `<p class="note">To answer from this page, run it in a <a href="https://herdr.dev" target="_blank" rel="noopener">herdr</a> pane. Or go back to it: <code class="cmd">${esc(i.resume)}</code> <button class="btn small" data-copy="${esc(i.resume)}">Copy</button></p>`;
@@ -936,7 +936,9 @@ function askHtml(i) {
   return html + `</div>`;
 }
 
+/** Fits the reply box to its text; measured only while it shows (hidden, it measures nothing). */
 function grow(t) {
+  if (!t.offsetParent) return void (t.style.height = "");
   t.style.height = "auto";
   t.style.height = Math.min(t.scrollHeight + 2, Math.round(innerHeight * 0.35)) + "px";
 }
@@ -1314,6 +1316,7 @@ function paint() {
   if (tab === "chat") {
     syncChat(e);
     paintDock(e);
+    if ($("prompt") && !$("prompt").style.height) grow($("prompt"));
   } else if (tab === "changes") syncChanges(e);
   else if (tab === "files") syncFiles(e);
 }
