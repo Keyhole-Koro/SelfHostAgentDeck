@@ -20,6 +20,9 @@ import {
   authenticationOptions,
   cookie,
   cookieNames,
+  confirmed,
+  confirmedCookie,
+  confirmOptions,
   createPairing,
   listPasskeys,
   loginPage,
@@ -34,7 +37,9 @@ import {
   saveOrigin,
   sessionPasskey,
   verifyAuthentication,
+  verifyConfirm,
   verifyRegistration,
+  PASSKEY_HELPERS,
   type Passkey,
   type RemoteConfig,
 } from "./remote.ts";
@@ -190,7 +195,8 @@ function viewerPage(nonce: string, mode: "local" | "remote"): string {
   return readFileSync(PAGE, "utf8")
     .replace("<head>", `<head>\n<meta name="agent-diff-mode" content="${mode}">`)
     .replace("<script>", `<script nonce="${nonce}">`)
-    .replace("/*@markdown*/", () => readFileSync(MARKDOWN, "utf8"));
+    .replace("/*@markdown*/", () => readFileSync(MARKDOWN, "utf8"))
+    .replace("/*@passkey*/", () => PASSKEY_HELPERS);
 }
 
 async function body(req: IncomingMessage): Promise<Record<string, unknown>> {
@@ -286,11 +292,17 @@ export async function serve(opts: ServeOptions): Promise<Served> {
     return repo;
   };
 
-  /** The API, for the local page and for signed-in devices (`device` set: remote, and logged). */
-  const api = async (req: IncomingMessage, res: ServerResponse, url: URL, device?: Passkey): Promise<void> => {
+  /**
+   * The API, for the local page and for signed-in devices (`device` set: remote, and logged). A
+   * device acts (prompts, keys, staging, starting, uploading) only within a few minutes of a
+   * passkey check: a stolen cookie alone can look, not act.
+   */
+  const api = async (req: IncomingMessage, res: ServerResponse, url: URL, device?: Passkey, fresh = false): Promise<void> => {
     const log = (action: string, target?: string, detail?: string) => {
       if (device) audit({ device: device.label, action, ...(target && { target }), ...(detail && { detail }) });
     };
+    const acting = req.method === "POST" && /^\/api\/(herdr\/(prompt|keys)|stage|start|upload|ci\/send)$/.test(url.pathname);
+    if (device && acting && !fresh) return json(res, 403, { error: "Confirm it is you with this device's passkey.", confirm: true });
     if (req.method === "GET" && url.pathname === "/api/inbox") {
       const inbox = currentInbox();
       const conflicts = findConflicts(inbox.items, (i) => placeOf(i.cwd).repo);
@@ -443,7 +455,7 @@ export async function serve(opts: ServeOptions): Promise<Served> {
         const b = await body(req);
         const signIn = (p: Passkey, action: string) => {
           const s = newSession(p);
-          res.setHeader("set-cookie", [cookie(cfg, names.session, s.value, s.maxAge), cookie(cfg, names.ceremony, "", 0)]);
+          res.setHeader("set-cookie", [cookie(cfg, names.session, s.value, s.maxAge), cookie(cfg, names.ceremony, "", 0), confirmedCookie(cfg, p)]);
           audit({ device: p.label, action });
           return json(res, 200, { ok: true });
         };
@@ -462,8 +474,20 @@ export async function serve(opts: ServeOptions): Promise<Served> {
           }
           case "/auth/register/verify":
             return signIn(await verifyRegistration(cfg, ceremony, b["response"] as never), "paired this device");
+          case "/auth/confirm/options": {
+            if (!device) return json(res, 401, { error: "Sign in again.", login: "/login" });
+            const o = await confirmOptions(cfg, device);
+            res.setHeader("set-cookie", cookie(cfg, names.ceremony, o.ceremony, 300));
+            return json(res, 200, o.options);
+          }
+          case "/auth/confirm/verify": {
+            if (!device) return json(res, 401, { error: "Sign in again.", login: "/login" });
+            await verifyConfirm(cfg, ceremony, b["response"] as never, device);
+            res.setHeader("set-cookie", [cookie(cfg, names.ceremony, "", 0), confirmedCookie(cfg, device)]);
+            return json(res, 200, { ok: true });
+          }
           case "/auth/logout":
-            res.setHeader("set-cookie", cookie(cfg, names.session, "", 0));
+            res.setHeader("set-cookie", [cookie(cfg, names.session, "", 0), cookie(cfg, names.fresh, "", 0)]);
             if (device) audit({ device: device.label, action: "signed out" });
             return json(res, 200, { ok: true });
         }
@@ -479,7 +503,7 @@ export async function serve(opts: ServeOptions): Promise<Served> {
       if (url.pathname.startsWith("/api/")) {
         if (!device) return json(res, 401, { error: "Sign in again.", login: "/login" });
         if (!fromPage) return json(res, 403, { error: "Not from this page." });
-        return await api(req, res, url, device);
+        return await api(req, res, url, device, confirmed(readCookie(req.headers.cookie, names.fresh), device));
       }
       return json(res, 404, { error: "Not found" });
     } catch (e) {

@@ -219,12 +219,16 @@ export function saveOrigin(origin: string): void {
 
 export type Ceremony =
   | { kind: "login"; challenge: string; exp: number }
+  | { kind: "confirm"; challenge: string; pk: string; exp: number }
   | { kind: "register"; challenge: string; pairing: string; label: string; exp: number };
+
+/** How long a passkey check counts for acting (sending prompts and keys, starting, uploading). */
+export const CONFIRM_SECONDS = 5 * 60;
 
 export const cookieNames = (cfg: RemoteConfig) => {
   // The __Host- prefix needs Secure, which http://localhost (tests) cannot have.
   const prefix = cfg.origin.startsWith("https:") ? "__Host-" : "";
-  return { session: `${prefix}agent_diff_session`, ceremony: `${prefix}agent_diff_webauthn` };
+  return { session: `${prefix}agent_diff_session`, ceremony: `${prefix}agent_diff_webauthn`, fresh: `${prefix}agent_diff_confirmed` };
 };
 
 export function cookie(cfg: RemoteConfig, name: string, value: string, maxAge: number): string {
@@ -279,12 +283,44 @@ export async function authenticationOptions(cfg: RemoteConfig): Promise<{ option
 export async function verifyAuthentication(cfg: RemoteConfig, ceremonyToken: string | undefined, response: AuthenticationResponseJSON): Promise<Passkey> {
   const c = verify<Ceremony>(ceremonyToken);
   if (!c || c.kind !== "login") throw new Error("The sign-in request expired. Try again.");
+  return verifyAssertion(cfg, c.challenge, response);
+}
+
+/** Options for checking the signed-in device's own passkey again, before it acts. */
+export async function confirmOptions(cfg: RemoteConfig, passkey: Passkey): Promise<{ options: PublicKeyCredentialRequestOptionsJSON; ceremony: string }> {
+  const options = await generateAuthenticationOptions({
+    rpID: cfg.rpId,
+    userVerification: "required",
+    allowCredentials: [{ id: passkey.id, transports: passkey.transports as AuthenticatorTransport[] | undefined }],
+  });
+  return { options, ceremony: sign({ kind: "confirm", challenge: options.challenge, pk: passkey.id, exp: Math.floor(Date.now() / 1000) + CEREMONY_SECONDS }) };
+}
+
+/** The check itself: the same passkey the session stands for, verified just now. */
+export async function verifyConfirm(cfg: RemoteConfig, ceremonyToken: string | undefined, response: AuthenticationResponseJSON, passkey: Passkey): Promise<Passkey> {
+  const c = verify<Ceremony>(ceremonyToken);
+  if (!c || c.kind !== "confirm" || c.pk !== passkey.id) throw new Error("The check expired. Try again.");
+  if (response.id !== passkey.id) throw new Error("Use this device's own passkey.");
+  return verifyAssertion(cfg, c.challenge, response);
+}
+
+/** A cookie that says this device's passkey was checked a moment ago. */
+export function confirmedCookie(cfg: RemoteConfig, passkey: Passkey): string {
+  return cookie(cfg, cookieNames(cfg).fresh, sign({ pk: passkey.id, exp: Math.floor(Date.now() / 1000) + CONFIRM_SECONDS }), CONFIRM_SECONDS);
+}
+
+export function confirmed(token: string | undefined, passkey: Passkey | undefined): boolean {
+  const c = verify<{ pk: string; exp: number }>(token);
+  return !!c && !!passkey && c.pk === passkey.id;
+}
+
+async function verifyAssertion(cfg: RemoteConfig, challenge: string, response: AuthenticationResponseJSON): Promise<Passkey> {
   const list = listPasskeys();
   const passkey = list.find((p) => p.id === response.id);
   if (!passkey) throw new Error("This passkey is not registered here (it may have been removed). Pair the device again.");
   const result = await verifyAuthenticationResponse({
     response,
-    expectedChallenge: c.challenge,
+    expectedChallenge: challenge,
     expectedOrigin: cfg.origin,
     expectedRPID: cfg.rpId,
     credential: { id: passkey.id, publicKey: new Uint8Array(Buffer.from(passkey.publicKey, "base64url")), counter: passkey.counter, transports: passkey.transports as AuthenticatorTransport[] | undefined },
@@ -318,8 +354,11 @@ export function passkeyLabel(userAgent: string | undefined): string {
 
 // ---------------------------------------------------------------- pages
 
-/** Browser code for passkeys (from SelfHostArtifacts): JSON options in, credential JSON out. */
-const PASSKEY_JS = `
+/**
+ * Browser code for passkeys (from SelfHostArtifacts): JSON options in, credential JSON out. The
+ * viewer page inlines it too, to check the passkey again before acting.
+ */
+export const PASSKEY_HELPERS = `
 const b64 = {
   toBytes(s) {
     const b = atob(s.replace(/-/g, "+").replace(/_/g, "/") + "===".slice((s.length + 3) % 4));
@@ -331,12 +370,6 @@ const b64 = {
     return btoa(s).replace(/\\+/g, "-").replace(/\\//g, "_").replace(/=+$/, "");
   },
 };
-async function post(url, body) {
-  const res = await fetch(url, { method: "POST", headers: { "content-type": "application/json", "x-agent-diff": "1" }, credentials: "same-origin", body: JSON.stringify(body || {}) });
-  const json = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(json.error || "Something went wrong. Try again.");
-  return json;
-}
 const creation = (o) => ({ ...o, challenge: b64.toBytes(o.challenge), user: { ...o.user, id: b64.toBytes(o.user.id) }, excludeCredentials: (o.excludeCredentials || []).map((c) => ({ ...c, id: b64.toBytes(c.id) })) });
 const request = (o) => ({ ...o, challenge: b64.toBytes(o.challenge), allowCredentials: (o.allowCredentials || []).map((c) => ({ ...c, id: b64.toBytes(c.id) })) });
 function registration(cred) {
@@ -348,6 +381,15 @@ function authentication(cred) {
   const r = cred.response;
   return { id: cred.id, rawId: b64.from(cred.rawId), type: cred.type, clientExtensionResults: cred.getClientExtensionResults(), authenticatorAttachment: cred.authenticatorAttachment || undefined,
     response: { clientDataJSON: b64.from(r.clientDataJSON), authenticatorData: b64.from(r.authenticatorData), signature: b64.from(r.signature), userHandle: r.userHandle ? b64.from(r.userHandle) : undefined } };
+}
+`;
+
+const PASSKEY_JS = `${PASSKEY_HELPERS}
+async function post(url, body) {
+  const res = await fetch(url, { method: "POST", headers: { "content-type": "application/json", "x-agent-diff": "1" }, credentials: "same-origin", body: JSON.stringify(body || {}) });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(json.error || "Something went wrong. Try again.");
+  return json;
 }
 document.querySelectorAll("[data-passkey]").forEach((button) => button.addEventListener("click", async () => {
   const error = document.getElementById("error");

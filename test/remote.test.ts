@@ -190,6 +190,26 @@ describe("remote: pairing and signing in", () => {
     assert.equal((await call("GET", "/api/inbox", { cookie: fresh, headers: page() })).status, 200);
   });
 
+  it("acts only within minutes of a passkey check: the session cookie alone can look, not act", async () => {
+    const only = session.split("; ").filter((c) => c.startsWith("agent_diff_session=")).join("; ");
+    const blocked = await call("POST", "/api/herdr/prompt", { body: { key: "claude:s1", text: "rm -rf /" }, cookie: only, headers: page() });
+    assert.equal(blocked.status, 403);
+    assert.equal(blocked.json.confirm, true);
+    assert.equal((await call("POST", "/api/hold", { body: { key: "claude:s1", kind: "later", until: "1h" }, cookie: only, headers: page() })).status, 200, "putting off is not acting");
+    const asked = await call("POST", "/auth/confirm/options", { cookie: only, headers: page() });
+    assert.deepEqual(asked.json.allowCredentials.map((c: { id: string }) => c.id), [passkey.id], "only this device's passkey");
+    const stranger = await softPasskey();
+    const wrong = await call("POST", "/auth/confirm/verify", { body: { response: await stranger.authenticate(asked.json, origin) }, cookie: jar([...asked.cookies, only]), headers: page() });
+    assert.equal(wrong.status, 400, "another passkey cannot stand in");
+    const again = await call("POST", "/auth/confirm/options", { cookie: only, headers: page() });
+    const ok = await call("POST", "/auth/confirm/verify", { body: { response: await passkey.authenticate(again.json, origin) }, cookie: jar([...again.cookies, only]), headers: page() });
+    assert.equal(ok.status, 200, ok.body);
+    const now = await call("POST", "/api/herdr/prompt", { body: { key: "claude:s1", text: "hi" }, cookie: jar([only, ...ok.cookies]), headers: page() });
+    assert.equal(now.status, 400, "past the check, it fails on herdr (off here) instead");
+    assert.match(now.json.error, /herdr pane/);
+    assert.equal((await call("POST", "/auth/confirm/options", { headers: page() })).status, 401, "no check without a session");
+  });
+
   it("logs what a device does, and stops its sessions when it is removed", async () => {
     const held = await call("POST", "/api/hold", { body: { key: "claude:s1", kind: "done" }, cookie: session, headers: page() });
     assert.equal(held.status, 200, held.body);
@@ -227,7 +247,8 @@ describe("remote: closed doors", () => {
     assert.equal((await call("GET", "/api/inbox", { cookie: session })).status, 403, "no x-agent-diff header");
     assert.equal((await call("POST", "/api/hold", { body: { key: "claude:s1", kind: "done" }, cookie: session, headers: { origin: "https://evil.example", "x-agent-diff": "1" } })).status, 403);
     assert.equal((await call("POST", "/auth/login/options", { headers: { origin: "https://evil.example", "x-agent-diff": "1" } })).status, 403);
-    assert.equal((await call("GET", "/api/inbox", { cookie: session.replace(/.$/, (c) => (c === "A" ? "B" : "A")), headers: page() })).status, 401, "a tampered cookie");
+    const own = session.split("; ").find((c) => c.startsWith("agent_diff_session="))!;
+    assert.equal((await call("GET", "/api/inbox", { cookie: own.replace(/.$/, (c) => (c === "A" ? "B" : "A")), headers: page() })).status, 401, "a tampered cookie");
     const stranger = await softPasskey();
     const options = await call("POST", "/auth/login/options", { headers: page() });
     const r = await call("POST", "/auth/login/verify", { body: { response: await stranger.authenticate(options.json, origin) }, cookie: jar(options.cookies), headers: page() });
