@@ -7,14 +7,19 @@
 <link rel="apple-touch-icon" href="/icon-180.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Agent Deck">
-<meta name="theme-color" content="#faf9f6" media="(prefers-color-scheme: light)">
-<meta name="theme-color" content="#1b1a18" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#faf9f6">
 <title>Agent Deck</title>
 <style>
+/*
+ * Themes: a palette (the neutrals and the one color that marks what you can act on) in light and
+ * dark. The script in <head> sets data-palette and data-theme (light or dark, Auto following the
+ * system) before the page is drawn. Status colors (Claude, Codex, added, removed, waiting) stay
+ * the same in every palette, so they read the same whatever you picked.
+ */
 :root {
   --bg: #faf9f6; --side: #f3f1ec; --field: #ffffff; --text: #1f1d1a; --muted: #6b665e; --faint: #9a948a; --line: #e4e0d8;
   --hover: #ebe8e1; --selected: #e5e1d8; --bubble: #ebe7df; --code-bg: #efece5;
-  --accent: #3b5bdb; --accent-soft: #e7ebfb; --on-accent: #ffffff;
+  --accent: #2b2925; --accent-soft: #e8e3d9; --on-accent: #faf9f6;
   --add-bg: #e4f3e7; --add-text: #1d5c2e; --del-bg: #fbe9e9; --del-text: #8a2424;
   --hunk: #6f6a62; --claude: #b45a2c; --codex: #2d6a8f;
   --recorded: #1d5c2e; --sure: #2d6a8f; --likely: #8a6a12; --maybe: #8a2424;
@@ -24,17 +29,45 @@
   --col: 860px;
   color-scheme: light;
 }
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    --bg: #1b1a18; --side: #201f1d; --field: #252421; --text: #ece9e4; --muted: #a29c92; --faint: #79746b; --line: #34322e;
-    --hover: #292826; --selected: #302e2b; --bubble: #2d2b28; --code-bg: #262422;
-    --accent: #8ea6ff; --accent-soft: #252e50; --on-accent: #10131f;
-    --add-bg: #1c3123; --add-text: #9fdcae; --del-bg: #382121; --del-text: #f0a5a5;
-    --hunk: #9c968c; --claude: #e39a72; --codex: #7fb8dc;
-    --recorded: #9fdcae; --sure: #7fb8dc; --likely: #e3c56f; --maybe: #f0a5a5;
-    --urgent: #ff9b8f; --urgent-soft: #3a2220; --warn: #e3c56f; --warn-soft: #362f1e; --ok: #9fdcae;
-    color-scheme: dark;
-  }
+:root[data-palette="blue"] {
+  --bg: #f8fafc; --side: #eff3f8; --field: #ffffff; --text: #1a1f29; --muted: #5d6676; --faint: #8b94a3; --line: #dde3ec;
+  --hover: #e6ebf2; --selected: #dce3ee; --bubble: #e4eaf3; --code-bg: #edf1f6;
+  --accent: #2f5bd3; --accent-soft: #e2e9fb; --on-accent: #ffffff;
+}
+:root[data-palette="green"] {
+  --bg: #f7f9f6; --side: #eef2ed; --field: #ffffff; --text: #1b211d; --muted: #5d6960; --faint: #8b978e; --line: #dde4dc;
+  --hover: #e5ebe4; --selected: #dbe3da; --bubble: #e2e9e0; --code-bg: #ebf0e9;
+  --accent: #2e7553; --accent-soft: #deeee5; --on-accent: #ffffff;
+}
+:root[data-palette="violet"] {
+  --bg: #f9f8fb; --side: #f1eff6; --field: #ffffff; --text: #1e1b25; --muted: #645f70; --faint: #948ea0; --line: #e3e0ea;
+  --hover: #eae7f1; --selected: #e1ddeb; --bubble: #e7e3f0; --code-bg: #efedf4;
+  --accent: #6246c9; --accent-soft: #ebe6fa; --on-accent: #ffffff;
+}
+:root[data-theme="dark"] {
+  --bg: #1b1a18; --side: #201f1d; --field: #252421; --text: #ece9e4; --muted: #a29c92; --faint: #79746b; --line: #34322e;
+  --hover: #292826; --selected: #302e2b; --bubble: #2d2b28; --code-bg: #262422;
+  --accent: #e9e5de; --accent-soft: #34312d; --on-accent: #1b1a18;
+  --add-bg: #1c3123; --add-text: #9fdcae; --del-bg: #382121; --del-text: #f0a5a5;
+  --hunk: #9c968c; --claude: #e39a72; --codex: #7fb8dc;
+  --recorded: #9fdcae; --sure: #7fb8dc; --likely: #e3c56f; --maybe: #f0a5a5;
+  --urgent: #ff9b8f; --urgent-soft: #3a2220; --warn: #e3c56f; --warn-soft: #362f1e; --ok: #9fdcae;
+  color-scheme: dark;
+}
+:root[data-theme="dark"][data-palette="blue"] {
+  --bg: #151922; --side: #191e28; --field: #1f2531; --text: #e5e9f1; --muted: #9aa3b4; --faint: #6c7586; --line: #2b3241;
+  --hover: #222937; --selected: #29313f; --bubble: #263042; --code-bg: #1d2330;
+  --accent: #8ca9ff; --accent-soft: #233157; --on-accent: #0e1424;
+}
+:root[data-theme="dark"][data-palette="green"] {
+  --bg: #161a17; --side: #1a1f1b; --field: #202621; --text: #e5ebe6; --muted: #9ba79e; --faint: #6d7970; --line: #2c342e;
+  --hover: #232a24; --selected: #29322b; --bubble: #27302a; --code-bg: #1e2420;
+  --accent: #82cfa6; --accent-soft: #1f3a2c; --on-accent: #0d1a13;
+}
+:root[data-theme="dark"][data-palette="violet"] {
+  --bg: #19171e; --side: #1d1b23; --field: #23202a; --text: #ebe8f1; --muted: #a49eb1; --faint: #767083; --line: #322e3b;
+  --hover: #27242e; --selected: #2e2a36; --bubble: #2d2937; --code-bg: #221f28;
+  --accent: #b6a2ff; --accent-soft: #2f2650; --on-accent: #16112a;
 }
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
@@ -77,6 +110,19 @@ header#top h1 { margin: 0; font-size: 16px; font-weight: 650; letter-spacing: -.
 .menu-list button:hover { background: var(--hover); }
 .menu-list button[aria-pressed="true"] { color: var(--accent); }
 .menu-list button svg { color: var(--muted); }
+.theme-pick { margin-top: 4px; padding: 8px 10px 4px; border-top: 1px solid var(--line); display: grid; gap: 8px; }
+.theme-label { font-size: 12px; color: var(--faint); }
+.theme-pick .swatches { display: flex; gap: 10px; }
+.menu-list .theme-pick .swatch { width: 28px; height: 28px; padding: 0; border-radius: 50%; border: 1px solid rgba(0, 0, 0, .18); }
+.menu-list .theme-pick .swatch:hover { transform: scale(1.08); }
+.menu-list .theme-pick .swatch[aria-pressed="true"] { box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--text); }
+.sw-sand { background: linear-gradient(135deg, #f3f1ec 50%, #2b2925 50%) !important; }
+.sw-blue { background: linear-gradient(135deg, #eff3f8 50%, #2f5bd3 50%) !important; }
+.sw-green { background: linear-gradient(135deg, #eef2ed 50%, #2e7553 50%) !important; }
+.sw-violet { background: linear-gradient(135deg, #f1eff6 50%, #6246c9 50%) !important; }
+.theme-pick .seg { justify-self: start; }
+.menu-list .theme-pick .seg button { width: auto; padding: 0 10px; border-radius: 7px; font-size: 12px; color: var(--muted); }
+.menu-list .theme-pick .seg button[aria-pressed="true"] { background: var(--bg); color: var(--text); }
 .menu-note { margin-top: 4px; padding: 6px 10px 2px; border-top: 1px solid var(--line); font-size: 12px; color: var(--faint); }
 .menu-note:empty { display: none; }
 .send-btn { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 34px; height: 34px; padding: 0; border: 0; border-radius: 50%; background: var(--accent); color: var(--on-accent); cursor: pointer; }
@@ -511,6 +557,29 @@ body.pip { height: auto; min-height: 100vh; overflow: auto; display: block; }
   .sec { padding-left: 16px; padding-right: 16px; }
 }
 </style>
+<script>
+// The theme picked in this browser, set before the page is drawn so it never flashes another.
+const PALETTES = ["sand", "blue", "green", "violet"];
+const MODES = ["auto", "light", "dark"];
+const systemDark = matchMedia("(prefers-color-scheme: dark)");
+let theme = { palette: "sand", mode: "auto" };
+try {
+  const t = JSON.parse(localStorage.getItem("agent-deck:theme") || "{}") || {};
+  theme = { palette: PALETTES.includes(t.palette) ? t.palette : "sand", mode: MODES.includes(t.mode) ? t.mode : "auto" };
+} catch {
+  // storage blocked: the default theme
+}
+function applyTheme() {
+  const root = document.documentElement;
+  root.dataset.palette = theme.palette;
+  root.dataset.theme = theme.mode === "auto" ? (systemDark.matches ? "dark" : "light") : theme.mode;
+  // The browser's own bar, in the page's color.
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.content = getComputedStyle(root).getPropertyValue("--bg").trim();
+}
+applyTheme();
+systemDark.addEventListener("change", applyTheme);
+</script>
 </head>
 <body data-view="list" data-layout="focus">
 <header id="top">
@@ -526,6 +595,11 @@ body.pip { height: auto; min-height: 100vh; overflow: auto; display: block; }
     <details class="menu" id="more"><summary class="icon-btn" title="More" aria-label="More" data-icon="more"></summary><div class="menu-list">
       <button id="cleanup" data-icon="broom" title="Idle sessions and worktrees nobody uses">Clean up</button>
       <button id="remote" data-icon="phone" title="Use this page from your phone">Remote: your phone</button>
+      <div class="theme-pick" id="theme-pick">
+        <div class="theme-label">Theme</div>
+        <div class="swatches" role="group" aria-label="Colors"></div>
+        <div class="seg" role="group" aria-label="Light or dark"></div>
+      </div>
       <div class="menu-note" id="updated"></div>
     </div></details>
   </div>
@@ -635,10 +709,34 @@ const ICONS = {
 };
 const icon = (name, size = 18) => `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[name] || ""}</svg>`;
 for (const el of document.querySelectorAll("[data-icon]")) el.insertAdjacentHTML("afterbegin", icon(el.dataset.icon));
-// A menu closes when you pick from it, or click elsewhere.
+// A menu closes when you pick from it, or click elsewhere; the theme stays open to try others.
 document.addEventListener("click", (ev) => {
-  for (const m of document.querySelectorAll("details.menu[open]")) if (!m.contains(ev.target) || ev.target.closest(".menu-list button")) m.open = false;
+  for (const m of document.querySelectorAll("details.menu[open]")) if (!m.contains(ev.target) || (ev.target.closest(".menu-list button") && !ev.target.closest(".theme-pick"))) m.open = false;
 });
+const PALETTE_NAMES = { sand: "Sand", blue: "Blue", green: "Green", violet: "Violet" };
+const MODE_NAMES = { auto: "Auto", light: "Light", dark: "Dark" };
+const themePick = document.getElementById("theme-pick");
+themePick.querySelector(".swatches").innerHTML = PALETTES.map((p) => `<button class="swatch sw-${p}" data-palette="${p}" title="${PALETTE_NAMES[p]}" aria-label="${PALETTE_NAMES[p]}"></button>`).join("");
+themePick.querySelector(".seg").innerHTML = MODES.map((m) => `<button data-mode="${m}">${MODE_NAMES[m]}</button>`).join("");
+// Marked in place: a button replaced under the click would read as a click outside the menu.
+function paintThemePick() {
+  for (const b of themePick.querySelectorAll("[data-palette]")) b.setAttribute("aria-pressed", String(b.dataset.palette === theme.palette));
+  for (const b of themePick.querySelectorAll("[data-mode]")) b.setAttribute("aria-pressed", String(b.dataset.mode === theme.mode));
+}
+themePick.addEventListener("click", (ev) => {
+  const b = ev.target.closest("button");
+  if (!b) return;
+  if (b.dataset.palette) theme.palette = b.dataset.palette;
+  if (b.dataset.mode) theme.mode = b.dataset.mode;
+  try {
+    localStorage.setItem("agent-deck:theme", JSON.stringify(theme));
+  } catch {
+    // storage blocked: this visit only
+  }
+  applyTheme();
+  paintThemePick();
+});
+paintThemePick();
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 /** Escaped text with its web links made links: what you typed to a session. */
 const linkify = (s) => esc(s).replace(/https?:\/\/[\w\-.~:/?#[\]@!$&*+,;=%()]*[\w\-~/#@$&*+=%]/g, (u) => `<a href="${u}" target="_blank" rel="noopener noreferrer">${u}</a>`);

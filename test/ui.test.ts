@@ -358,6 +358,26 @@ esac
     await page.waitForSelector(".session[aria-current=\"true\"]");
   });
 
+  it("keeps the theme you pick, its colors and light or dark", async () => {
+    const root = () => page.evaluate(() => [document.documentElement.dataset.palette, document.documentElement.dataset.theme]);
+    assert.equal((await root())[0], "sand");
+    await page.click("#more > summary");
+    await page.click('#theme-pick [data-palette="blue"]');
+    await page.click('#theme-pick [data-mode="dark"]');
+    assert.equal(await page.evaluate(() => (document.getElementById("more") as HTMLDetailsElement).open), true, "the menu stays open to try another");
+    assert.deepEqual(await root(), ["blue", "dark"]);
+    assert.equal(await page.locator('#theme-pick [data-palette="blue"]').getAttribute("aria-pressed"), "true");
+    const bg = await page.evaluate(() => getComputedStyle(document.body).backgroundColor);
+    assert.equal(bg, "rgb(21, 25, 34)");
+    await page.reload();
+    await page.waitForSelector(".session");
+    assert.deepEqual(await root(), ["blue", "dark"], "kept in this browser");
+    await page.click("#more > summary");
+    await page.click('#theme-pick [data-palette="sand"]');
+    await page.click('#theme-pick [data-mode="auto"]');
+    await page.click("#more > summary");
+  });
+
   it("shows a long conversation a page at a time, its steps folded, its HTML as text", async () => {
     await page.click('.session[data-key="claude:chatty"]');
     await page.waitForSelector("#chat .steps");

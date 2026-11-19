@@ -96,7 +96,8 @@ agent-deck view --since today    # with the changes since a time or a commit
 | Tablet | The sessions and the conversation side by side; the details in their own tab |
 | Phone | The list, then one session full screen with Back; the reply box stays at the bottom |
 
-The page follows your system's light or dark setting.
+The page follows your system's light or dark setting. **More → Theme** picks its colors (Sand, Blue,
+Green or Violet) and Light or Dark instead of Auto; the choice is kept in that browser.
 
 ![The same page in the dark](docs/screenshots/viewer-dark.png)
 

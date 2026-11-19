@@ -265,7 +265,7 @@ function json(res: ServerResponse, status: number, value: unknown): void {
   send(res, status, "application/json; charset=utf-8", JSON.stringify(value));
 }
 
-/** An HTML page whose only script is the one carrying `nonce`, and which no other site may frame. */
+/** An HTML page whose only scripts are the ones carrying `nonce`, and which no other site may frame. */
 function html(res: ServerResponse, body: string, nonce: string): void {
   res.setHeader(
     "content-security-policy",
@@ -276,11 +276,11 @@ function html(res: ServerResponse, body: string, nonce: string): void {
   send(res, 200, "text/html; charset=utf-8", body);
 }
 
-/** The page, with its script allowed by the nonce and the mode it runs in. */
+/** The page, with its scripts allowed by the nonce and the mode it runs in. */
 function viewerPage(nonce: string, mode: "local" | "remote"): string {
   return readFileSync(PAGE, "utf8")
     .replace("<head>", `<head>\n<meta name="agent-deck-mode" content="${mode}">`)
-    .replace("<script>", `<script nonce="${nonce}">`)
+    .replaceAll("<script>", `<script nonce="${nonce}">`)
     .replace("/*@markdown*/", () => readFileSync(MARKDOWN, "utf8"))
     .replace("/*@passkey*/", () => PASSKEY_HELPERS)
     .replace("/*@layouts*/", () => userLayouts());
