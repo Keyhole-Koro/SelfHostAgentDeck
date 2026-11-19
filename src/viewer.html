@@ -3,6 +3,10 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="apple-touch-icon" href="/icon-180.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Agent Deck">
 <meta name="theme-color" content="#faf9f6" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#1b1a18" media="(prefers-color-scheme: dark)">
 <title>Agent Diff</title>
@@ -394,7 +398,7 @@ dialog p { margin: 0 0 14px; color: var(--muted); font-size: 14px; }
   <div class="tools">
     <span class="limits optional" id="limits"></span>
     <button class="tbtn" id="activity" title="What happened in every session">Activity</button>
-    <button class="tbtn" id="notify" aria-pressed="false" title="Desktop notifications when a session starts waiting on you">Notify</button>
+    <button class="tbtn" id="notify" aria-pressed="false" title="A notification when a session waits on you, also with the page closed">Notify</button>
     <button class="tbtn" id="cleanup" title="Idle sessions and worktrees nobody uses">Clean up</button>
     <button class="tbtn" id="remote" title="Use this page from your phone">Remote</button>
     <span class="optional" id="updated"></span>
@@ -427,7 +431,19 @@ dialog p { margin: 0 0 14px; color: var(--muted); font-size: 14px; }
 /*@passkey*/
 
 const params = new URLSearchParams(location.hash.slice(1));
-const token = params.get("t") || "";
+// The local page's token, kept for when it opens without it (from a home screen, or a notification).
+const token = params.get("t") || (() => {
+  try {
+    return JSON.parse(localStorage.getItem("agent-diff:token") || '""');
+  } catch {
+    return "";
+  }
+})();
+try {
+  if (params.get("t")) localStorage.setItem("agent-diff:token", JSON.stringify(params.get("t")));
+} catch {
+  // storage blocked: the URL keeps carrying it
+}
 /** "remote": served through the tunnel to a device signed in with a passkey (no token, a cookie). */
 const mode = (document.querySelector('meta[name="agent-diff-mode"]') || {}).content || "local";
 let range = params.get("since") ? "since=" + encodeURIComponent(params.get("since")) : params.get("base") ? "base=" + encodeURIComponent(params.get("base")) : "";
@@ -767,7 +783,7 @@ function paintHeader() {
     $("limits").className = "limits optional" + (high ? " high" : "");
     $("limits").title = [l.primary && `5-hour window resets ${new Date(l.primary.resetsAt).toLocaleString()}`, l.secondary && `weekly window resets ${new Date(l.secondary.resetsAt).toLocaleString()}`].filter(Boolean).join("\n");
   } else $("limits").textContent = "";
-  $("notify").setAttribute("aria-pressed", String(notifyOn));
+  $("notify").setAttribute("aria-pressed", String(pushOn || notifyOn));
   for (const id of SPECIAL) $(id).setAttribute("aria-pressed", String(selected === id));
   document.title = (answer + turn ? `(${answer + turn}) ` : "") + "Agent Diff";
 }
@@ -776,7 +792,7 @@ function paintHeader() {
 
 /** Sessions that started waiting since the last look (the same rule as `agent-diff inbox --watch`). */
 function notifyChanges() {
-  if (!notifyOn || !prev || !inbox) return;
+  if (pushOn || !notifyOn || !prev || !inbox) return; // pushed by the server instead
   const before = new Map(prev.items.map((i) => [i.key, i]));
   for (const i of inbox.items) {
     if (!waiting(i)) continue;
@@ -797,7 +813,50 @@ function notifyChanges() {
   }
 }
 
+/**
+ * Notifications pushed by the server, which come with the page closed (on iPhone, to the app
+ * added to the home screen); else the page's own, while it is open.
+ */
+const canPush = "serviceWorker" in navigator && "PushManager" in window && (mode === "remote" || !!token);
+let pushOn = false;
+
+async function initPush() {
+  if (!canPush) return;
+  try {
+    const reg = await navigator.serviceWorker.register("/sw.js");
+    pushOn = !!(await reg.pushManager.getSubscription());
+    paintHeader();
+  } catch {
+    // no worker here (an insecure origin, a private window)
+  }
+}
+if ("serviceWorker" in navigator) navigator.serviceWorker.addEventListener("message", (ev) => ev.data && ev.data.open && openSession(ev.data.open));
+
+async function togglePush() {
+  try {
+    const reg = await navigator.serviceWorker.ready;
+    const current = await reg.pushManager.getSubscription();
+    if (pushOn && current) {
+      await post("/api/push/unsubscribe", { endpoint: current.endpoint });
+      await current.unsubscribe();
+      pushOn = false;
+    } else {
+      if ((await Notification.requestPermission()) !== "granted") throw new Error("Notifications are blocked for this page; allow them in the browser's settings.");
+      const { key } = await api("/api/push");
+      const sub = current || (await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64.toBytes(key) }));
+      await post("/api/push/subscribe", { subscription: sub.toJSON() });
+      pushOn = true;
+      await post("/api/push/test", {});
+    }
+  } catch (e) {
+    alert(e.message);
+  }
+  paintHeader();
+}
+
 $("notify").onclick = async () => {
+  if (canPush) return void togglePush();
+  if (/iPhone|iPad/.test(navigator.userAgent)) return alert("On iPhone and iPad, notifications come to the app on the home screen: tap Share, then Add to Home Screen, open Agent Deck from there, and tap Notify.");
   if (typeof Notification === "undefined") return alert("This browser has no notifications.");
   if (!notifyOn && Notification.permission !== "granted") {
     if ((await Notification.requestPermission()) !== "granted") return;
@@ -1863,7 +1922,10 @@ setInterval(() => {
 
 if (!phone.matches) document.body.dataset.view = "session";
 if (!token && mode === "local") $("main").innerHTML = '<div class="error empty">Open the full URL that agent-diff printed (it carries the access token).</div>';
-else void loadInbox();
+else {
+  void loadInbox();
+  void initPush();
+}
 </script>
 </body>
 </html>
