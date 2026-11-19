@@ -308,9 +308,9 @@ WantedBy=default.target
 
 # ~/.config/systemd/user/agent-deck-tunnel.service
 [Service]
-Type=notify
 ExecStart=/usr/bin/cloudflared --no-autoupdate tunnel --config %h/.cloudflared/agent-deck.yml run
-Restart=on-failure
+Restart=always
+RestartSec=15
 
 [Install]
 WantedBy=default.target
@@ -320,6 +320,11 @@ WantedBy=default.target
 systemctl --user enable --now agent-deck.service agent-deck-tunnel.service
 loginctl enable-linger    # optional: run them while you are logged out too
 ```
+
+`cloudflared` reaches Cloudflare on port 7844, over UDP (QUIC) by default, or over TCP with
+`protocol: http2` in its config. Some networks block UDP; add that line there. Some block port
+7844 altogether, and on those the tunnel cannot connect. With `Restart=always` it keeps trying,
+and connects again once you are on another network.
 
 ### Where it looks
 
