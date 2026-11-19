@@ -6,6 +6,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, beforeEach, describe, it } from "node:test";
 
+// Run inside herdr or not, the processes these tests start must not inherit a real herdr pane.
+delete process.env["HERDR_PANE_ID"];
+delete process.env["HERDR_SOCKET_PATH"];
+
 /**
  * Remote access as a phone would use it, against a real `agent-deck view --remote`: pairing,
  * registering a passkey, signing in, and every door it must keep shut. The passkey is a software

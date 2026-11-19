@@ -5,6 +5,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeEach, describe, it } from "node:test";
 
+// Run inside herdr or not, the processes these tests start must not inherit a real herdr pane.
+delete process.env["HERDR_PANE_ID"];
+delete process.env["HERDR_SOCKET_PATH"];
+
 const CLI = join(import.meta.dirname, "..", "src", "cli.ts");
 const PAST = "2026-01-01T00:00:00Z";
 const NOW = new Date().toISOString();

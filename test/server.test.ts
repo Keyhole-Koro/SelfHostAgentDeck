@@ -7,6 +7,10 @@ import { afterEach, beforeEach, describe, it } from "node:test";
 import { summarize } from "../src/prs.ts";
 import { browser, decrypt, pushService } from "./push-browser.ts";
 
+// Run inside herdr or not, the processes these tests start must not inherit a real herdr pane.
+delete process.env["HERDR_PANE_ID"];
+delete process.env["HERDR_SOCKET_PATH"];
+
 /** The page's API, served by `agent-deck view` over a made-up home and repository. */
 
 const CLI = join(import.meta.dirname, "..", "src", "cli.ts");

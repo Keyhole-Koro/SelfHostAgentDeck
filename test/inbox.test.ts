@@ -6,6 +6,10 @@ import { join } from "node:path";
 import { after, beforeEach, describe, it } from "node:test";
 import { codexCommand, endsWithQuestion, readInbox, terminalApp, transcriptOf, type InboxItem } from "../src/inbox.ts";
 
+// Run inside herdr or not, the processes these tests start must not inherit a real herdr pane.
+delete process.env["HERDR_PANE_ID"];
+delete process.env["HERDR_SOCKET_PATH"];
+
 const HOUR = 36e5;
 let home: string; // stands for ~/.claude
 let codex: string; // stands for ~/.codex

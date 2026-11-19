@@ -5,6 +5,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
 
+// Run inside herdr or not, the processes these tests start must not inherit a real herdr pane.
+delete process.env["HERDR_PANE_ID"];
+delete process.env["HERDR_SOCKET_PATH"];
+
 /**
  * Remote access in a real browser: Chromium with a virtual authenticator (DevTools' WebAuthn
  * domain) pairs through the link, makes a passkey, uses the page, signs out and back in. Skipped
