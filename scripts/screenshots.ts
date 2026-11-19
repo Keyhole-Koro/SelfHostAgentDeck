@@ -1,7 +1,7 @@
 /**
  * Takes the README screenshots: builds a small demo repository changed by a fake Claude Code
  * session, a fake Codex session, a shell command caught by the hook and a hand edit, opens
- * `agent-diff view` on it and captures the page. Run with `npm run screenshots`.
+ * `agent-deck view` on it and captures the page. Run with `npm run screenshots`.
  */
 import { execFileSync, spawn } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -152,20 +152,25 @@ const url = await new Promise<string>((resolve, reject) => {
     const m = /http:\S+/.exec(String(d));
     if (m) resolve(m[0]);
   });
-  child.on("exit", () => reject(new Error("agent-diff view exited")));
+  child.on("exit", () => reject(new Error("agent-deck view exited")));
 });
 
 mkdirSync(OUT, { recursive: true });
 const browser = await chromium.launch();
 try {
-  for (const [name, width, height, scheme] of [
-    ["viewer", 1280, 900, "light"],
-    ["viewer-dark", 1280, 900, "dark"],
+  for (const [name, width, height, scheme, tab, phone] of [
+    ["viewer", 1440, 900, "light", "chat", false],
+    ["viewer-dark", 1440, 900, "dark", "chat", false],
+    ["changes", 1440, 900, "light", "changes", false],
+    ["phone", 390, 844, "light", "chat", true],
   ] as const) {
-    const page = await browser.newPage({ viewport: { width, height }, colorScheme: scheme, deviceScaleFactor: 2 });
+    const page = await browser.newPage({ viewport: { width, height }, colorScheme: scheme, deviceScaleFactor: 2, ...(phone && { isMobile: true, hasTouch: true }) });
     await page.goto(`${url}&s=claude:${cs}`);
     await page.waitForSelector(".session");
-    await page.waitForSelector(".file");
+    if (phone) await page.click(`.session[data-key="claude:${cs}"]`);
+    if (tab !== "chat") await page.click(`[data-tab="${tab}"]`);
+    await page.waitForSelector(tab === "changes" ? ".diff-file" : "#chat .msg");
+    await page.waitForTimeout(500);
     await page.screenshot({ path: join(OUT, `${name}.png`) });
     console.log(`docs/screenshots/${name}.png`);
   }
