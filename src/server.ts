@@ -4,6 +4,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { Worker } from "node:worker_threads";
 import { join } from "node:path";
 import { renderSVG } from "uqr";
+import { ciFailure } from "./ci.ts";
 import { cleanup } from "./cleanup.ts";
 import { findConflicts } from "./conflicts.ts";
 import { readChat } from "./conversation.ts";
@@ -403,6 +404,12 @@ export async function serve(opts: ServeOptions): Promise<Served> {
       const img = image(root, item.cwd ?? root, path);
       res.writeHead(200, { "content-type": img.type, "cache-control": "no-store", "x-content-type-options": "nosniff", "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; sandbox" });
       return void res.end(img.data);
+    }
+    if (req.method === "GET" && url.pathname === "/api/ci") {
+      const item = listed(url.searchParams.get("key"));
+      const pr = url.searchParams.get("url") ?? "";
+      if (!(item.prs ?? []).some((p) => p.url === pr)) throw new FileError("Not a pull request of this session.", 404);
+      return json(res, 200, await ciFailure(pr));
     }
     if (req.method === "POST" && url.pathname === "/api/upload") {
       const project = url.searchParams.get("project");
