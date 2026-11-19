@@ -9,7 +9,7 @@
 <meta name="apple-mobile-web-app-title" content="Agent Deck">
 <meta name="theme-color" content="#faf9f6" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#1b1a18" media="(prefers-color-scheme: dark)">
-<title>Agent Diff</title>
+<title>Agent Deck</title>
 <style>
 :root {
   --bg: #faf9f6; --side: #f3f1ec; --field: #ffffff; --text: #1f1d1a; --muted: #6b665e; --faint: #9a948a; --line: #e4e0d8;
@@ -404,7 +404,7 @@ dialog p { margin: 0 0 14px; color: var(--muted); font-size: 14px; }
 </head>
 <body data-view="list">
 <header id="top">
-  <h1>Agent Diff</h1>
+  <h1>Agent Deck</h1>
   <div class="summary" id="summary"></div>
   <div class="tools">
     <span class="limits optional" id="limits"></span>
@@ -442,22 +442,33 @@ dialog p { margin: 0 0 14px; color: var(--muted); font-size: 14px; }
 /*@markdown*/
 /*@passkey*/
 
+// Agent Deck was agent-diff: what this browser kept moves over to the new keys, once.
+try {
+  for (const k of Object.keys(localStorage)) {
+    if (!k.startsWith("agent-diff:")) continue;
+    const to = "agent-deck:" + k.slice("agent-diff:".length);
+    if (localStorage.getItem(to) === null) localStorage.setItem(to, localStorage.getItem(k));
+    localStorage.removeItem(k);
+  }
+} catch {
+  // storage blocked
+}
 const params = new URLSearchParams(location.hash.slice(1));
 // The local page's token, kept for when it opens without it (from a home screen, or a notification).
 const token = params.get("t") || (() => {
   try {
-    return JSON.parse(localStorage.getItem("agent-diff:token") || '""');
+    return JSON.parse(localStorage.getItem("agent-deck:token") || '""');
   } catch {
     return "";
   }
 })();
 try {
-  if (params.get("t")) localStorage.setItem("agent-diff:token", JSON.stringify(params.get("t")));
+  if (params.get("t")) localStorage.setItem("agent-deck:token", JSON.stringify(params.get("t")));
 } catch {
   // storage blocked: the URL keeps carrying it
 }
 /** "remote": served through the tunnel to a device signed in with a passkey (no token, a cookie). */
-const mode = (document.querySelector('meta[name="agent-diff-mode"]') || {}).content || "local";
+const mode = (document.querySelector('meta[name="agent-deck-mode"]') || {}).content || "local";
 let range = params.get("since") ? "since=" + encodeURIComponent(params.get("since")) : params.get("base") ? "base=" + encodeURIComponent(params.get("base")) : "";
 let selected = params.get("s") || null;
 let inbox = null; // running sessions, in every repository
@@ -516,7 +527,7 @@ const CONFIDENCE = {
 // Per-browser conveniences; the page works the same without storage.
 function stored(key, fallback) {
   try {
-    const v = localStorage.getItem("agent-diff:" + key);
+    const v = localStorage.getItem("agent-deck:" + key);
     return v === null ? fallback : JSON.parse(v);
   } catch {
     return fallback;
@@ -524,7 +535,7 @@ function stored(key, fallback) {
 }
 function store(key, value) {
   try {
-    localStorage.setItem("agent-diff:" + key, JSON.stringify(value));
+    localStorage.setItem("agent-deck:" + key, JSON.stringify(value));
   } catch {
     // storage blocked
   }
@@ -541,7 +552,7 @@ const QUICK = /^ja\b/.test(navigator.language || "") ? ["続けて", "それで�
 let quick = stored("quick", QUICK);
 let keysOpen = false; // the keypad and the screen, under a question with choices
 
-const headers = () => ({ "content-type": "application/json", "x-agent-diff": "1", ...(token && { "x-token": token }) });
+const headers = () => ({ "content-type": "application/json", "x-agent-deck": "1", ...(token && { "x-token": token }) });
 async function api(path, init = {}, again = false) {
   const res = await fetch(path, { ...init, headers: { ...headers(), ...init.headers }, credentials: "same-origin" });
   if (res.status === 401 && mode === "remote") {
@@ -800,12 +811,12 @@ function paintHeader() {
   } else $("limits").textContent = "";
   $("notify").setAttribute("aria-pressed", String(pushOn || notifyOn));
   for (const id of SPECIAL) $(id).setAttribute("aria-pressed", String(selected === id));
-  document.title = (answer + turn ? `(${answer + turn}) ` : "") + "Agent Diff";
+  document.title = (answer + turn ? `(${answer + turn}) ` : "") + "Agent Deck";
 }
 
 // ------------------------------------------------------------ notifications
 
-/** Sessions that started waiting since the last look (the same rule as `agent-diff inbox --watch`). */
+/** Sessions that started waiting since the last look (the same rule as `agent-deck inbox --watch`). */
 function notifyChanges() {
   if (pushOn || !notifyOn || !prev || !inbox) return; // pushed by the server instead
   const before = new Map(prev.items.map((i) => [i.key, i]));
@@ -1152,7 +1163,7 @@ function paintInfo(e) {
       const o = inbox.items.find((x) => x.key === k);
       return `<button class="linkish" data-goto="${esc(k)}">${esc(o ? nameOf(o) : k.split(":")[1].slice(0, 8))}</button>`;
     };
-    html += sec("Shared files", `<p class="note">Another running session has uncommitted changes in the same ${plural(i.conflicts.length, "file")}:</p><ul class="list">${i.conflicts.map((c) => `<li><code class="cmd">${esc(c.path)}</code> with ${c.with.map(other).join(", ")}</li>`).join("")}</ul><p class="sub">Staging with <code class="cmd">agent-diff add</code> keeps each session's hunks apart.</p>`, " warn");
+    html += sec("Shared files", `<p class="note">Another running session has uncommitted changes in the same ${plural(i.conflicts.length, "file")}:</p><ul class="list">${i.conflicts.map((c) => `<li><code class="cmd">${esc(c.path)}</code> with ${c.with.map(other).join(", ")}</li>`).join("")}</ul><p class="sub">Staging with <code class="cmd">agent-deck add</code> keeps each session's hunks apart.</p>`, " warn");
   }
   if (i.reason && i.state !== "needs-answer") html += sec("Now", `<div>${esc(i.reason)}</div>`);
   if (i.tasks && i.tasks.length) {
@@ -1393,7 +1404,7 @@ async function paintChanges(e, fresh = false) {
   const hunks = s.files.reduce((n, f) => n + f.hunks.length, 0);
   const stage = range ? "" : `<button class="btn primary" id="stage">Stage this session's changes</button>`;
   box.innerHTML = head(`${where} · ${plural(s.files.length, "file")}, ${hunkWord(hunks)}`) + `<div id="review-slot">${reviewBar(e.key, e.item)}</div>` +
-    `<div class="stage-row">${stage}<code class="cmd">agent-diff add ${esc(s.id.slice(0, 8))}</code></div><div id="plan"></div>` +
+    `<div class="stage-row">${stage}<code class="cmd">agent-deck add ${esc(s.id.slice(0, 8))}</code></div><div id="plan"></div>` +
     s.files.map((f) => paintFile(f, e.key)).join("") + legend();
   if (stage) $("stage").onclick = () => planStage(repo, s);
 }
@@ -1610,7 +1621,7 @@ async function paintRemote() {
     "Remote",
     r.origin
       ? `Open <a href="${esc(r.origin)}" target="_blank" rel="noopener">${esc(r.origin)}</a> on a device you added, and sign in with its passkey.`
-      : "Remote access is off. Start <code class=\"cmd\">agent-diff view --remote https://…</code> behind a Cloudflare Tunnel to use this page from your phone.",
+      : "Remote access is off. Start <code class=\"cmd\">agent-deck view --remote https://…</code> behind a Cloudflare Tunnel to use this page from your phone.",
   );
   html += `<div class="actions">${mode === "local" && r.origin ? '<button class="btn primary" data-remote="pair">Add a phone</button>' : ""}${mode === "remote" ? '<button class="btn" data-remote="logout">Sign out</button>' : ""}</div><div id="pairing"></div>`;
   html += `<div class="block"><div class="label">Devices · ${r.devices.length}</div>`;
@@ -1618,7 +1629,7 @@ async function paintRemote() {
     ? `<table class="clean"><tr><th>Device</th><th>Added</th><th>Last used</th><th></th></tr>${r.devices
         .map((d) => `<tr><td>${esc(d.label)}${d.current ? ' <span class="sub">(this one)</span>' : ""}</td><td>${esc(when(d.createdAt))}</td><td>${esc(d.lastUsedAt ? when(d.lastUsedAt) : "")}</td><td><button class="btn small" data-remote="revoke" data-id="${esc(d.id)}">Remove</button></td></tr>`)
         .join("")}</table>`
-    : `<p class="note">None yet.${mode === "local" && r.origin ? " Add one with the button above, or agent-diff remote pair." : ""}</p>`;
+    : `<p class="note">None yet.${mode === "local" && r.origin ? " Add one with the button above, or agent-deck remote pair." : ""}</p>`;
   html += `</div><div class="block"><div class="label">Done from other devices</div>`;
   html += r.log.length
     ? `<ul class="list">${r.log.map((e) => `<li><span class="sub">${esc(when(e.at))}</span> <b>${esc(e.device)}</b> ${esc(e.action)}${e.target ? ` <code class="cmd">${esc(e.target)}</code>` : ""}${e.detail ? `<div class="sub">${esc(e.detail)}</div>` : ""}</li>`).join("")}</ul>`
@@ -2030,7 +2041,7 @@ $("app").addEventListener("click", async (ev) => {
       await post("/api/remote/revoke", { id: b.dataset.id });
       void paintRemote();
     } else if (b.dataset.remote === "logout") {
-      await fetch("/auth/logout", { method: "POST", headers: { "x-agent-diff": "1" }, credentials: "same-origin" });
+      await fetch("/auth/logout", { method: "POST", headers: { "x-agent-deck": "1" }, credentials: "same-origin" });
       location.assign("/login");
     }
   } catch (e) {
@@ -2043,7 +2054,7 @@ setInterval(() => {
 }, 5000);
 
 if (!phone.matches) document.body.dataset.view = "session";
-if (!token && mode === "local") $("main").innerHTML = '<div class="error empty">Open the full URL that agent-diff printed (it carries the access token).</div>';
+if (!token && mode === "local") $("main").innerHTML = '<div class="error empty">Open the full URL that agent-deck printed (it carries the access token).</div>';
 else {
   void loadInbox();
   void initPush();

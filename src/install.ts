@@ -9,10 +9,12 @@ import type { Agent } from "./types.ts";
  * Registers the recorder as a PreToolUse + PostToolUse hook, user-wide, in
  *   Claude Code: ~/.claude/settings.json   (hooks.PreToolUse / hooks.PostToolUse)
  *   Codex:       ~/.codex/hooks.json       (same shape)
- * Other hooks are left as they are; ours are recognised by the "agent-diff-hook" marker.
+ * Other hooks are left as they are; ours are recognised by the "agent-deck-hook" marker (or
+ * "agent-diff-hook", from before the rename).
  */
 
-const MARKER = "agent-diff-hook";
+const MARKER = "agent-deck-hook";
+const MARKERS = [MARKER, "agent-diff-hook"];
 const EVENTS = ["PreToolUse", "PostToolUse"] as const;
 /** Tools that can write files. Read-only tools are not hooked, so they cost nothing. */
 const MATCHERS: Record<Agent, string> = {
@@ -51,12 +53,12 @@ function readSettings(file: string): Settings {
 }
 
 function isOurs(group: HookGroup): boolean {
-  return group.hooks?.some((h) => h.command?.includes(MARKER)) ?? false;
+  return group.hooks?.some((h) => MARKERS.some((m) => h.command?.includes(m))) ?? false;
 }
 
 function writeSettings(file: string, settings: Settings): void {
   mkdirSync(dirname(file), { recursive: true });
-  if (existsSync(file)) copyFileSync(file, `${file}.bak-agent-diff`);
+  if (existsSync(file)) copyFileSync(file, `${file}.bak-agent-deck`);
   writeFileSync(file, JSON.stringify(settings, null, 2) + "\n");
 }
 
@@ -105,7 +107,8 @@ export function agentInstalled(agent: Agent): boolean {
 
 // ---------------------------------------------------------------- status line
 
-const STATUS_MARKER = "agent-diff-statusline";
+const STATUS_MARKER = "agent-deck-statusline";
+const isOurStatus = (command: string | undefined) => !!command && [STATUS_MARKER, "agent-diff-statusline"].some((m) => command.includes(m));
 
 /** How Claude Code should run the status line: the installed bin, else node + this checkout. */
 function statusCommand(): string {
@@ -125,7 +128,7 @@ export function installStatusLine(): { file: string; changed: boolean; skipped?:
   const file = settingsFile("claude");
   const settings = readSettings(file);
   const current = settings["statusLine"] as StatusLine | undefined;
-  if (current && !current.command?.includes(STATUS_MARKER)) return { file, changed: false, skipped: current.command ?? "another status line" };
+  if (current && !isOurStatus(current.command)) return { file, changed: false, skipped: current.command ?? "another status line" };
   const want: StatusLine = { type: "command", command: statusCommand(), padding: 0 };
   if (JSON.stringify(current) === JSON.stringify(want)) return { file, changed: false };
   settings["statusLine"] = want;
@@ -138,14 +141,17 @@ export function uninstallStatusLine(): { file: string; changed: boolean } {
   if (!existsSync(file)) return { file, changed: false };
   const settings = readSettings(file);
   const current = settings["statusLine"] as StatusLine | undefined;
-  if (!current?.command?.includes(STATUS_MARKER)) return { file, changed: false };
+  if (!isOurStatus(current?.command)) return { file, changed: false };
   delete settings["statusLine"];
   writeSettings(file, settings);
   return { file, changed: true };
 }
 
 /** Marks a skill folder as ours, so only our own copies are replaced or removed. */
-const SKILL_MARKER = ".installed-by-agent-diff";
+const SKILL_MARKER = ".installed-by-agent-deck";
+const ours = (dir: string) => existsSync(join(dir, SKILL_MARKER)) || existsSync(join(dir, ".installed-by-agent-diff"));
+/** Skills of ours that were renamed: removed when installing or uninstalling. */
+const RENAMED = ["agent-diff-commit"];
 const SKILLS = join(dirname(fileURLToPath(import.meta.url)), "..", "skills");
 
 /** Claude Code reads ~/.claude/skills; Codex (and Gemini CLI) read ~/.agents/skills. */
@@ -156,15 +162,16 @@ export function skillDir(agent: Agent): string {
 export function installSkills(agent: Agent): { dir: string; installed: string[]; skipped: string[] } {
   const dir = skillDir(agent);
   const result = { dir, installed: [] as string[], skipped: [] as string[] };
+  for (const old of RENAMED) if (ours(join(dir, old))) rmSync(join(dir, old), { recursive: true, force: true });
   for (const skill of readdirSync(SKILLS)) {
     const dest = join(dir, skill);
-    if (existsSync(dest) && !existsSync(join(dest, SKILL_MARKER))) {
+    if (existsSync(dest) && !ours(dest)) {
       result.skipped.push(skill); // someone else's skill with the same name
       continue;
     }
     rmSync(dest, { recursive: true, force: true });
     cpSync(join(SKILLS, skill), dest, { recursive: true });
-    writeFileSync(join(dest, SKILL_MARKER), "Installed by `agent-diff install`; removed by `agent-diff uninstall`.\n");
+    writeFileSync(join(dest, SKILL_MARKER), "Installed by `agent-deck install`; removed by `agent-deck uninstall`.\n");
     result.installed.push(skill);
   }
   return result;
@@ -173,8 +180,8 @@ export function installSkills(agent: Agent): { dir: string; installed: string[];
 export function uninstallSkills(agent: Agent): string[] {
   const dir = skillDir(agent);
   const removed: string[] = [];
-  for (const skill of readdirSync(SKILLS)) {
-    if (!existsSync(join(dir, skill, SKILL_MARKER))) continue;
+  for (const skill of [...readdirSync(SKILLS), ...RENAMED]) {
+    if (!ours(join(dir, skill))) continue;
     rmSync(join(dir, skill), { recursive: true, force: true });
     removed.push(skill);
   }

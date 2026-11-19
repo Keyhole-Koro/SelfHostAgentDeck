@@ -4,7 +4,7 @@ import { basename, isAbsolute, join, resolve } from "node:path";
 import { sessionKey, type Agent } from "./types.ts";
 
 /**
- * `agent-diff inbox`: the running Claude Code and Codex sessions that wait on you, across every
+ * `agent-deck inbox`: the running Claude Code and Codex sessions that wait on you, across every
  * repository, on one screen.
  *
  * Claude Code keeps a record per running process in ~/.claude/sessions/<pid>.json with a status

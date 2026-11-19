@@ -19,12 +19,12 @@ import { stateDir } from "./holds.ts";
  * https://agents.example.com, signed in with a passkey.
  *
  * - A device is added through a single-use pairing link (10 minutes) made on this computer, by
- *   `agent-diff remote pair` or the page opened locally: whoever holds this computer adds devices.
+ *   `agent-deck remote pair` or the page opened locally: whoever holds this computer adds devices.
  * - Signing in is a passkey for the public origin; the session is a signed cookie naming the
  *   passkey, so removing a passkey ends its sessions.
  * - Everything a remote device changes (prompts, keys, holds, staging) is logged.
  *
- * State lives in $XDG_STATE_HOME/agent-diff/remote/, readable by you only: the signing secret,
+ * State lives in $XDG_STATE_HOME/agent-deck/remote/, readable by you only: the signing secret,
  * the passkeys (public keys), pending pairings (hashed) and the log. Modelled on SelfHostArtifacts'
  * passkey sign-in.
  */
@@ -206,7 +206,7 @@ export function readAudit(limit = 50): RemoteEvent[] {
   return out.slice(-limit).reverse();
 }
 
-/** The origin the remote page was last started with, for `agent-diff remote pair`. */
+/** The origin the remote page was last started with, for `agent-deck remote pair`. */
 export function savedOrigin(): string | undefined {
   return readJson<{ origin?: string }>("config.json", {}).origin;
 }
@@ -228,7 +228,7 @@ export const CONFIRM_SECONDS = 5 * 60;
 export const cookieNames = (cfg: RemoteConfig) => {
   // The __Host- prefix needs Secure, which http://localhost (tests) cannot have.
   const prefix = cfg.origin.startsWith("https:") ? "__Host-" : "";
-  return { session: `${prefix}agent_diff_session`, ceremony: `${prefix}agent_diff_webauthn`, fresh: `${prefix}agent_diff_confirmed` };
+  return { session: `${prefix}agent_deck_session`, ceremony: `${prefix}agent_deck_webauthn`, fresh: `${prefix}agent_deck_confirmed` };
 };
 
 export function cookie(cfg: RemoteConfig, name: string, value: string, maxAge: number): string {
@@ -246,10 +246,10 @@ export function readCookie(header: string | undefined, name: string): string | u
 export async function registrationOptions(cfg: RemoteConfig, pairing: string, label: string): Promise<{ options: PublicKeyCredentialCreationOptionsJSON; ceremony: string }> {
   if (!pairingValid(pairing)) throw new Error("This pairing link has expired or was used. Make a new one on your computer.");
   const options = await generateRegistrationOptions({
-    rpName: "Agent Diff",
+    rpName: "Agent Deck",
     rpID: cfg.rpId,
     userName: "owner",
-    userDisplayName: "Agent Diff owner",
+    userDisplayName: "Agent Deck owner",
     userID: ownerId(),
     attestationType: "none",
     excludeCredentials: listPasskeys().map((p) => ({ id: p.id, transports: p.transports as AuthenticatorTransport[] | undefined })),
@@ -386,7 +386,7 @@ function authentication(cred) {
 
 const PASSKEY_JS = `${PASSKEY_HELPERS}
 async function post(url, body) {
-  const res = await fetch(url, { method: "POST", headers: { "content-type": "application/json", "x-agent-diff": "1" }, credentials: "same-origin", body: JSON.stringify(body || {}) });
+  const res = await fetch(url, { method: "POST", headers: { "content-type": "application/json", "x-agent-deck": "1" }, credentials: "same-origin", body: JSON.stringify(body || {}) });
   const json = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(json.error || "Something went wrong. Try again.");
   return json;
@@ -448,18 +448,18 @@ button:disabled { opacity: .6; }
 export function loginPage(nonce: string): string {
   return page(
     nonce,
-    "Sign in · Agent Diff",
-    `<h1>Agent Diff</h1><p>Sign in with this device's passkey. No passkey yet? Make a pairing link on your computer with <b>agent-diff remote pair</b> and open it here.</p><button data-passkey="login">Sign in with a passkey</button><p id="error" role="alert"></p>`,
+    "Sign in · Agent Deck",
+    `<h1>Agent Deck</h1><p>Sign in with this device's passkey. No passkey yet? Make a pairing link on your computer with <b>agent-deck remote pair</b> and open it here.</p><button data-passkey="login">Sign in with a passkey</button><p id="error" role="alert"></p>`,
   );
 }
 
 export function pairPage(nonce: string, token: string, label: string): string {
   if (!pairingValid(token)) {
-    return page(nonce, "Pairing link · Agent Diff", `<h1>This link has expired</h1><p>Pairing links work once, for ${PAIRING_MINUTES} minutes. Make a new one on your computer with <b>agent-diff remote pair</b>.</p><p id="error"></p>`);
+    return page(nonce, "Pairing link · Agent Deck", `<h1>This link has expired</h1><p>Pairing links work once, for ${PAIRING_MINUTES} minutes. Make a new one on your computer with <b>agent-deck remote pair</b>.</p><p id="error"></p>`);
   }
   return page(
     nonce,
-    "Add this device · Agent Diff",
-    `<h1>Add this device</h1><p>This device gets a passkey for Agent Diff. With it you can see your coding-agent sessions and answer them from here.</p><label for="label">Name for this device</label><input id="label" value="${esc(label)}" maxlength="60"><button data-passkey="register" data-pairing="${esc(token)}">Create a passkey</button><p id="error" role="alert"></p>`,
+    "Add this device · Agent Deck",
+    `<h1>Add this device</h1><p>This device gets a passkey for Agent Deck. With it you can see your coding-agent sessions and answer them from here.</p><label for="label">Name for this device</label><input id="label" value="${esc(label)}" maxlength="60"><button data-passkey="register" data-pairing="${esc(token)}">Create a passkey</button><p id="error" role="alert"></p>`,
   );
 }

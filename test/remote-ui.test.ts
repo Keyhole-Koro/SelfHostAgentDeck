@@ -25,7 +25,7 @@ try {
 
 describe("remote page", { skip: !chromium && "no browser" }, () => {
   const home = mkdtempSync(join(tmpdir(), "adv-rui-"));
-  const env = { ...process.env, HOME: home, CLAUDE_CONFIG_DIR: "", CODEX_HOME: "", XDG_STATE_HOME: "", AGENT_DIFF_STATE_DIR: join(home, "state") };
+  const env = { ...process.env, HOME: home, CLAUDE_CONFIG_DIR: "", CODEX_HOME: "", XDG_STATE_HOME: "", AGENT_DECK_STATE_DIR: join(home, "state") };
   const port = 49_000 + Math.floor(Math.random() * 900);
   const origin = `http://localhost:${port}`;
   let server: ChildProcess;
@@ -85,7 +85,7 @@ describe("remote page", { skip: !chromium && "no browser" }, () => {
   it("asks for the passkey before acting from the phone, then sends", async () => {
     const all = await page.context().cookies();
     await page.context().clearCookies();
-    await page.context().addCookies(all.filter((c) => c.name !== "agent_diff_confirmed"));
+    await page.context().addCookies(all.filter((c) => c.name !== "agent_deck_confirmed"));
     const sent = page.evaluate(() => post("/api/herdr/prompt", { key: "claude:s1", text: "hi" }).then(() => "sent", (e: Error) => e.message));
     await page.waitForSelector("#confirm[open]");
     await page.click("#confirm-go");

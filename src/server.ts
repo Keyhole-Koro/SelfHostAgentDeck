@@ -51,9 +51,10 @@ import {
   type RemoteConfig,
 } from "./remote.ts";
 import type { ViewRequest } from "./view-worker.ts";
+import { env } from "./env.ts";
 
 /**
- * `agent-diff view`: a web page over the same data as the CLI: the running sessions, and the
+ * `agent-deck view`: a web page over the same data as the CLI: the running sessions, and the
  * changes each one made in its repository.
  *
  * Locally it listens on 127.0.0.1, and every API call needs the random token from the printed
@@ -246,7 +247,7 @@ function html(res: ServerResponse, body: string, nonce: string): void {
 /** The page, with its script allowed by the nonce and the mode it runs in. */
 function viewerPage(nonce: string, mode: "local" | "remote"): string {
   return readFileSync(PAGE, "utf8")
-    .replace("<head>", `<head>\n<meta name="agent-diff-mode" content="${mode}">`)
+    .replace("<head>", `<head>\n<meta name="agent-deck-mode" content="${mode}">`)
     .replace("<script>", `<script nonce="${nonce}">`)
     .replace("/*@markdown*/", () => readFileSync(MARKDOWN, "utf8"))
     .replace("/*@passkey*/", () => PASSKEY_HELPERS);
@@ -385,7 +386,7 @@ export async function serve(opts: ServeOptions): Promise<Served> {
       void notify({ title, body: (e.text ?? "").slice(0, 300), tag: e.key, key: e.key }, undefined, e.kind === "needs-answer" ? "high" : "normal");
     }
   };
-  setInterval(watch, Number(process.env["AGENT_DIFF_WATCH_MS"]) || 15_000).unref();
+  setInterval(watch, Number(env("WATCH_MS")) || 15_000).unref();
   setTimeout(watch, 1000).unref();
 
   /** A session the page listed: only those can be read. */
@@ -575,7 +576,7 @@ export async function serve(opts: ServeOptions): Promise<Served> {
     if (req.method === "POST" && url.pathname === "/api/remote/pair") {
       // Devices are added from this computer only: a device that is signed in cannot add others.
       if (device) return json(res, 403, { error: "Pair new devices from your computer." });
-      if (!cfg) return json(res, 400, { error: "Remote access is off: start agent-diff view with --remote <origin>." });
+      if (!cfg) return json(res, 400, { error: "Remote access is off: start agent-deck view with --remote <origin>." });
       const pairing = createPairing(cfg.origin);
       return json(res, 200, { ...pairing, svg: renderSVG(pairing.url, { border: 2 }) });
     }
@@ -602,7 +603,7 @@ export async function serve(opts: ServeOptions): Promise<Served> {
       }
       const asset = req.method === "GET" ? appAsset(url.pathname) : undefined;
       if (asset) return send(res, 200, asset.type, asset.body);
-      if (req.headers["x-token"] !== token) return json(res, 403, { error: "Open the URL agent-diff view printed (it carries the access token)." });
+      if (req.headers["x-token"] !== token) return json(res, 403, { error: "Open the URL agent-deck view printed (it carries the access token)." });
       return await api(req, res, url);
     } catch (e) {
       return json(res, e instanceof FileError ? e.status : 400, { error: (e as Error).message });
@@ -622,7 +623,7 @@ export async function serve(opts: ServeOptions): Promise<Served> {
       const device = sessionPasskey(readCookie(req.headers.cookie, names.session));
       // Requests that change something must come from our own page: same origin and our header,
       // which a form or another site's script cannot send without CORS (never granted here).
-      const fromPage = req.headers["x-agent-diff"] === "1" && (req.method === "GET" || req.headers.origin === cfg.origin);
+      const fromPage = req.headers["x-agent-deck"] === "1" && (req.method === "GET" || req.headers.origin === cfg.origin);
 
       const asset = req.method === "GET" ? appAsset(url.pathname) : undefined;
       if (asset) return send(res, 200, asset.type, asset.body);

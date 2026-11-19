@@ -6,6 +6,7 @@ import { stateDir } from "./holds.ts";
 import type { Inbox, InboxItem } from "./inbox.ts";
 import { label } from "./notify.ts";
 import type { PrStatus } from "./prs.ts";
+import { env } from "./env.ts";
 
 /**
  * A snapshot of the inbox as a small static page, published with SelfHostArtifacts' `artifact`
@@ -135,7 +136,7 @@ ${body}
 
 function artifact(args: string[]): Promise<string> {
   return new Promise((resolve, reject) => {
-    execFile(process.env["AGENT_DIFF_ARTIFACT"] || "artifact", args, { timeout: 60_000 }, (err, stdout, stderr) => (err ? reject(new Error((stderr || err.message).trim())) : resolve(stdout)));
+    execFile(env("ARTIFACT") || "artifact", args, { timeout: 60_000 }, (err, stdout, stderr) => (err ? reject(new Error((stderr || err.message).trim())) : resolve(stdout)));
   });
 }
 
@@ -145,7 +146,7 @@ export async function publishSnapshot(inbox: Inbox, opts: { prStatus?: Record<st
   mkdirSync(dir, { recursive: true });
   const file = join(dir, "agent-inbox.html");
   writeFileSync(file, snapshotHtml(inbox, opts));
-  const out = await artifact(["publish", file, "--title", "Agent inbox", "--description", "The coding-agent sessions waiting on you, from agent-diff", "--json"]);
+  const out = await artifact(["publish", file, "--title", "Agent inbox", "--description", "The coding-agent sessions waiting on you, from agent-deck", "--json"]);
   let r: { url?: string; created?: boolean } = {};
   try {
     r = JSON.parse(out) as typeof r;

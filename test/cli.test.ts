@@ -14,7 +14,7 @@ let env: NodeJS.ProcessEnv;
 
 beforeEach(() => {
   home = mkdtempSync(join(tmpdir(), "adv-cli-"));
-  env = { ...process.env, HOME: home, CLAUDE_CONFIG_DIR: "", CODEX_HOME: "", XDG_STATE_HOME: "", AGENT_DIFF_STATE_DIR: "", NO_COLOR: "1" };
+  env = { ...process.env, HOME: home, CLAUDE_CONFIG_DIR: "", CODEX_HOME: "", XDG_STATE_HOME: "", AGENT_DECK_STATE_DIR: "", NO_COLOR: "1" };
 });
 
 function run(args: string[], input?: string): string {
@@ -70,7 +70,7 @@ describe("statusline", () => {
   it("is set up by install --statusline, without replacing someone else's", () => {
     const settings = join(home, ".claude", "settings.json");
     run(["install", "--agent", "claude", "--statusline"]);
-    assert.match(JSON.parse(readFileSync(settings, "utf8")).statusLine.command, /agent-diff-statusline/);
+    assert.match(JSON.parse(readFileSync(settings, "utf8")).statusLine.command, /agent-deck-statusline/);
     run(["uninstall", "--agent", "claude"]);
     assert.equal(JSON.parse(readFileSync(settings, "utf8")).statusLine, undefined);
 
@@ -87,7 +87,7 @@ describe("inbox --watch --notify", () => {
     const notifier = join(home, "notify.sh");
     writeFileSync(notifier, `#!/bin/sh\nprintf '%s|%s\\n' "$1" "$2" >> "${log}"\n`);
     chmodSync(notifier, 0o755);
-    const child = spawn(process.execPath, [CLI, "inbox", "--watch", "--notify", "--interval", "0.1"], { cwd: home, env: { ...env, AGENT_DIFF_NOTIFY: notifier } });
+    const child = spawn(process.execPath, [CLI, "inbox", "--watch", "--notify", "--interval", "0.1"], { cwd: home, env: { ...env, AGENT_DECK_NOTIFY: notifier } });
     try {
       let out = "";
       child.stdout.on("data", (d: Buffer) => (out += String(d)));
@@ -121,7 +121,7 @@ describe("inbox --publish", () => {
     const fake = join(home, "artifact");
     writeFileSync(fake, `#!/bin/sh\nprintf '%s\\n' "$*" > "${args}"\ncp "$2" "${copy}"\nprintf '%s\\n' '{"url":"https://artifacts.example/a/abc","version":1,"created":true}'\n`);
     chmodSync(fake, 0o755);
-    const out = execFileSync(process.execPath, [CLI, "inbox", "--publish"], { cwd: home, env: { ...env, AGENT_DIFF_ARTIFACT: fake, AGENT_DIFF_GH: "/nonexistent/gh" }, encoding: "utf8" });
+    const out = execFileSync(process.execPath, [CLI, "inbox", "--publish"], { cwd: home, env: { ...env, AGENT_DECK_ARTIFACT: fake, AGENT_DECK_GH: "/nonexistent/gh" }, encoding: "utf8" });
     assert.equal(out, "Published: https://artifacts.example/a/abc\n");
     assert.match(readFileSync(args, "utf8"), /^publish \S+agent-inbox\.html --title Agent inbox .*--json$/m);
     const html = readFileSync(copy, "utf8");
@@ -134,6 +134,6 @@ describe("inbox --publish", () => {
 
   it("says why when publishing fails", () => {
     running("p1", { status: "idle" });
-    assert.throws(() => execFileSync(process.execPath, [CLI, "inbox", "--publish"], { cwd: home, env: { ...env, AGENT_DIFF_ARTIFACT: "/nonexistent/artifact" }, encoding: "utf8", stdio: "pipe" }), /ENOENT|not found|nonexistent/);
+    assert.throws(() => execFileSync(process.execPath, [CLI, "inbox", "--publish"], { cwd: home, env: { ...env, AGENT_DECK_ARTIFACT: "/nonexistent/artifact" }, encoding: "utf8", stdio: "pipe" }), /ENOENT|not found|nonexistent/);
   });
 });

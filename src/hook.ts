@@ -5,12 +5,13 @@ import { runningSessions } from "./inbox.ts";
 import type { Agent } from "./types.ts";
 
 /**
- * The hook recorder. Claude Code and Codex run `agent-diff hook --agent <a>` before and after
+ * The hook recorder. Claude Code and Codex run `agent-deck hook --agent <a>` before and after
  * every tool call that can write files, with the call described as JSON on stdin.
  *
  * Before the call it stores the current content of the files the call may touch as git blobs
  * (`git hash-object -w`); after the call it stores them again and appends one record to
- * .git/agent-diff/log.jsonl: which session changed which file from which blob to which blob.
+ * .git/agent-diff/log.jsonl: which session changed which file from which blob to which blob. (The
+ * folder keeps the name the tool had before, so records written before the rename still count.)
  * Diffing those blobs later gives exactly what the call changed — shell commands included.
  *
  * Before Claude Code edits a file that another running session has uncommitted changes in, it
@@ -143,7 +144,7 @@ function sharedFileWarning(root: string, dir: string, rel: string, me: string, c
   return JSON.stringify({
     hookSpecificOutput: {
       hookEventName: "PreToolUse",
-      additionalContext: `agent-diff: ${rel} also has uncommitted changes from another running session: ${who}. Keep their edits intact, and when committing, stage only your own changes (agent-diff add --self).`,
+      additionalContext: `agent-deck: ${rel} also has uncommitted changes from another running session: ${who}. Keep their edits intact, and when committing, stage only your own changes (agent-deck add --self).`,
     },
   });
 }

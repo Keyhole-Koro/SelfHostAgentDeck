@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, it } from "node:test";
 import { summarize } from "../src/prs.ts";
 import { browser, decrypt, pushService } from "./push-browser.ts";
 
-/** The page's API, served by `agent-diff view` over a made-up home and repository. */
+/** The page's API, served by `agent-deck view` over a made-up home and repository. */
 
 const CLI = join(import.meta.dirname, "..", "src", "cli.ts");
 const PAST = "2026-01-01T00:00:00Z";
@@ -23,7 +23,7 @@ function git(cwd: string, ...args: string[]): string {
 beforeEach(() => {
   home = mkdtempSync(join(tmpdir(), "adv-srv-home-"));
   repo = realpathSync(mkdtempSync(join(tmpdir(), "adv-srv-repo-")));
-  env = { ...process.env, HOME: home, CLAUDE_CONFIG_DIR: "", CODEX_HOME: "", XDG_STATE_HOME: "", AGENT_DIFF_STATE_DIR: "" };
+  env = { ...process.env, HOME: home, CLAUDE_CONFIG_DIR: "", CODEX_HOME: "", XDG_STATE_HOME: "", AGENT_DECK_STATE_DIR: "" };
   git(repo, "init", "-q", "-b", "main");
   writeFileSync(join(repo, "shared.ts"), ["const a = 1;", "", "", "", "", "", "", "", "", "const z = 26;", ""].join("\n"));
   git(repo, "add", ".");
@@ -146,7 +146,7 @@ describe("api: an app with notifications", () => {
     const service = await pushService();
     transcript("sa", []);
     running("sa", process.pid, { status: "busy" });
-    const api = await serve({ AGENT_DIFF_WATCH_MS: "200", AGENT_DIFF_PUSH_INSECURE: "1" });
+    const api = await serve({ AGENT_DECK_WATCH_MS: "200", AGENT_DECK_PUSH_INSECURE: "1" });
     const b = browser();
     await api.post("/api/push/subscribe", { subscription: { endpoint: `${service.url}/push/1`, keys: b.keys } });
     assert.equal((await api.get("/api/push")).endpoints.length, 1);
@@ -194,7 +194,7 @@ describe("api: pull requests", () => {
     chmodSync(gh, 0o755);
     transcript("sa", [{ type: "pr-link", prNumber: 7, prUrl: "https://github.com/o/r/pull/7", prRepository: "o/r" }]);
     running("sa", process.pid);
-    const api = await serve({ AGENT_DIFF_GH: gh });
+    const api = await serve({ AGENT_DECK_GH: gh });
     const status = await eventually(async () => (await api.get("/api/inbox")).prStatus["https://github.com/o/r/pull/7"]);
     assert.equal(status.ci, "failing");
     assert.deepEqual(status.checks, { passed: 1, failed: 1, pending: 1 });
@@ -300,7 +300,7 @@ esac
     writeFileSync(join(locks, `${codexId}.lock`), "");
     holder = spawn("flock", [join(locks, `${codexId}.lock`), "sleep", "30"], { stdio: "ignore", detached: true });
     await new Promise((r) => setTimeout(r, 200));
-    child = spawn(process.execPath, [CLI, "view", "--port", "0", ...extra], { cwd: repo, env: { ...env, AGENT_DIFF_HERDR: bin } });
+    child = spawn(process.execPath, [CLI, "view", "--port", "0", ...extra], { cwd: repo, env: { ...env, AGENT_DECK_HERDR: bin } });
     const url = await new Promise<string>((resolve) => child!.stdout!.on("data", (d: Buffer) => /http:\S+/.test(String(d)) && resolve(/http:\S+/.exec(String(d))![0])));
     const { origin, hash } = new URL(url);
     const headers = { "x-token": new URLSearchParams(hash.slice(1)).get("t")!, "content-type": "application/json" };

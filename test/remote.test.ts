@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { after, before, beforeEach, describe, it } from "node:test";
 
 /**
- * Remote access as a phone would use it, against a real `agent-diff view --remote`: pairing,
+ * Remote access as a phone would use it, against a real `agent-deck view --remote`: pairing,
  * registering a passkey, signing in, and every door it must keep shut. The passkey is a software
  * authenticator whose responses go through the real WebAuthn verification.
  */
@@ -118,7 +118,7 @@ function call(method: string, path: string, opts: { body?: object; cookie?: stri
 }
 
 /** Headers our page sends on its requests. */
-const page = () => ({ origin, "x-agent-diff": "1" });
+const page = () => ({ origin, "x-agent-deck": "1" });
 const jar = (cookies: string[]) => cookies.filter((c) => !c.endsWith("=")).join("; ");
 
 async function pairDevice(passkey: Awaited<ReturnType<typeof softPasskey>>, label = "Test phone"): Promise<string> {
@@ -139,7 +139,7 @@ async function signIn(passkey: Awaited<ReturnType<typeof softPasskey>>): Promise
 before(async () => {
   home = mkdtempSync(join(tmpdir(), "adv-remote-"));
   state = join(home, "state");
-  env = { ...process.env, HOME: home, CLAUDE_CONFIG_DIR: "", CODEX_HOME: "", XDG_STATE_HOME: "", AGENT_DIFF_STATE_DIR: state, AGENT_DIFF_PUSH_INSECURE: "1" };
+  env = { ...process.env, HOME: home, CLAUDE_CONFIG_DIR: "", CODEX_HOME: "", XDG_STATE_HOME: "", AGENT_DECK_STATE_DIR: state, AGENT_DECK_PUSH_INSECURE: "1" };
   const sessions = join(home, ".claude", "sessions");
   mkdirSync(sessions, { recursive: true });
   writeFileSync(join(sessions, `${process.pid}.json`), JSON.stringify({ pid: process.pid, sessionId: "s1", cwd: home, name: "builder", status: "idle", statusUpdatedAt: Date.now() }));
@@ -174,12 +174,12 @@ describe("remote: pairing and signing in", () => {
 
   it("adds a device through a one-time pairing link", async () => {
     session = await pairDevice(passkey);
-    assert.match(session, /^agent_diff_session=/);
+    assert.match(session, /^agent_deck_session=/);
     const inbox = await call("GET", "/api/inbox", { cookie: session, headers: page() });
     assert.equal(inbox.status, 200);
     assert.deepEqual(inbox.json.items.map((i: { key: string }) => i.key), ["claude:s1"]);
     const viewer = await call("GET", "/", { cookie: session });
-    assert.match(viewer.body, /<meta name="agent-diff-mode" content="remote">/);
+    assert.match(viewer.body, /<meta name="agent-deck-mode" content="remote">/);
     assert.match(viewer.body, /<script nonce="[^"]+">/);
     assert.match(cli("remote", "devices"), /Test phone/);
     assert.equal(statSync(join(state, "remote", "passkeys.json")).mode & 0o777, 0o600, "readable by you only");
@@ -193,7 +193,7 @@ describe("remote: pairing and signing in", () => {
   });
 
   it("acts only within minutes of a passkey check: the session cookie alone can look, not act", async () => {
-    const only = session.split("; ").filter((c) => c.startsWith("agent_diff_session=")).join("; ");
+    const only = session.split("; ").filter((c) => c.startsWith("agent_deck_session=")).join("; ");
     const blocked = await call("POST", "/api/herdr/prompt", { body: { key: "claude:s1", text: "rm -rf /" }, cookie: only, headers: page() });
     assert.equal(blocked.status, 403);
     assert.equal(blocked.json.confirm, true);
@@ -261,10 +261,10 @@ describe("remote: closed doors", () => {
     const passkey = await softPasskey();
     const session = await pairDevice(passkey, "Second phone");
     assert.equal((await call("GET", "/login", { host: "evil.example" })).status, 403);
-    assert.equal((await call("GET", "/api/inbox", { cookie: session })).status, 403, "no x-agent-diff header");
-    assert.equal((await call("POST", "/api/hold", { body: { key: "claude:s1", kind: "done" }, cookie: session, headers: { origin: "https://evil.example", "x-agent-diff": "1" } })).status, 403);
-    assert.equal((await call("POST", "/auth/login/options", { headers: { origin: "https://evil.example", "x-agent-diff": "1" } })).status, 403);
-    const own = session.split("; ").find((c) => c.startsWith("agent_diff_session="))!;
+    assert.equal((await call("GET", "/api/inbox", { cookie: session })).status, 403, "no x-agent-deck header");
+    assert.equal((await call("POST", "/api/hold", { body: { key: "claude:s1", kind: "done" }, cookie: session, headers: { origin: "https://evil.example", "x-agent-deck": "1" } })).status, 403);
+    assert.equal((await call("POST", "/auth/login/options", { headers: { origin: "https://evil.example", "x-agent-deck": "1" } })).status, 403);
+    const own = session.split("; ").find((c) => c.startsWith("agent_deck_session="))!;
     assert.equal((await call("GET", "/api/inbox", { cookie: own.replace(/.$/, (c) => (c === "A" ? "B" : "A")), headers: page() })).status, 401, "a tampered cookie");
     const stranger = await softPasskey();
     const options = await call("POST", "/auth/login/options", { headers: page() });

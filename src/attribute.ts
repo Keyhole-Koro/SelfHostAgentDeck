@@ -2,7 +2,7 @@ import type { ChangedFile, Hunk } from "./git.ts";
 import { filesMentioned, shellMayWrite } from "./shell.ts";
 import type { FileEvent, Transcripts } from "./types.ts";
 
-/** recorded: agent-diff's hook saw the session write it. sure/likely/maybe: from transcripts. */
+/** recorded: agent-deck's hook saw the session write it. sure/likely/maybe: from transcripts. */
 export type Confidence = "recorded" | "sure" | "likely" | "maybe";
 
 interface Writer {

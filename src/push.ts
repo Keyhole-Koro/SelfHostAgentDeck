@@ -2,6 +2,7 @@ import { createCipheriv, createECDH, createHash, createHmac, createPrivateKey, g
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { stateDir } from "./holds.ts";
+import { env } from "./env.ts";
 
 /**
  * Web Push, to tell a phone (a home-screen web app on iOS) or a browser that a session waits,
@@ -112,7 +113,7 @@ function validEndpoint(endpoint: string): boolean {
   try {
     const u = new URL(endpoint);
     if (u.protocol === "https:") return true;
-    return process.env["AGENT_DIFF_PUSH_INSECURE"] === "1" && u.protocol === "http:" && (u.hostname === "127.0.0.1" || u.hostname === "localhost");
+    return env("PUSH_INSECURE") === "1" && u.protocol === "http:" && (u.hostname === "127.0.0.1" || u.hostname === "localhost");
   } catch {
     return false;
   }

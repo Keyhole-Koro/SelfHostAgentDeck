@@ -65,9 +65,9 @@ describe("page", { skip: (!chromium && "no browser") || (process.platform !== "l
   };
   const tool = (id: string, name: string, input: object) => ({ type: "assistant", message: { content: [{ type: "tool_use", id, name, input }] } });
   const result = (id: string, toolUseResult: object = {}) => ({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: id, content: "ok" }] }, toolUseResult });
-  /** With AGENT_DIFF_UI_SHOTS=<dir>, screenshots of each step for a look by eye. */
+  /** With AGENT_DECK_UI_SHOTS=<dir>, screenshots of each step for a look by eye. */
   const shot = async (name: string) => {
-    const dir = process.env["AGENT_DIFF_UI_SHOTS"];
+    const dir = process.env["AGENT_DECK_UI_SHOTS"];
     if (dir) await page.screenshot({ path: join(dir, `${name}.png`) });
   };
   const herdrCalls = () => (existsSync(herdrLog) ? readFileSync(herdrLog, "utf8").split("\n").filter((l) => l && !l.includes("agent list")) : []);
@@ -165,7 +165,7 @@ esac
 
     const server = spawn(process.execPath, [CLI, "view", "--port", "0"], {
       cwd: repo,
-      env: { ...process.env, HOME: home, CLAUDE_CONFIG_DIR: "", CODEX_HOME: "", XDG_STATE_HOME: "", AGENT_DIFF_STATE_DIR: "", AGENT_DIFF_HERDR: herdr, AGENT_DIFF_GH: gh, AGENT_DIFF_WATCH_MS: "300" },
+      env: { ...process.env, HOME: home, CLAUDE_CONFIG_DIR: "", CODEX_HOME: "", XDG_STATE_HOME: "", AGENT_DECK_STATE_DIR: "", AGENT_DECK_HERDR: herdr, AGENT_DECK_GH: gh, AGENT_DECK_WATCH_MS: "300" },
     });
     kids.push(server);
     url = await new Promise<string>((resolve) => server.stdout!.on("data", (d: Buffer) => /http:\S+/.test(String(d)) && resolve(/http:\S+/.exec(String(d))![0])));

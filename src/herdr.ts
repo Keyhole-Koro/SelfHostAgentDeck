@@ -3,6 +3,7 @@ import { existsSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { InboxItem } from "./inbox.ts";
+import { env } from "./env.ts";
 
 /**
  * herdr (https://herdr.dev), a terminal workspace manager for coding agents, knows which pane each
@@ -42,7 +43,7 @@ interface AgentInfo {
   workspace_id?: string | null;
 }
 
-const bin = () => process.env["AGENT_DIFF_HERDR"] || "herdr";
+const bin = () => env("HERDR") || "herdr";
 
 /** Runs a herdr command against one herdr session; resolves to its `result`. */
 export function herdr(socket: string, args: string[], timeout = 8000): Promise<Record<string, unknown>> {

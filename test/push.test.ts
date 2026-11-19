@@ -5,8 +5,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 
-process.env["AGENT_DIFF_STATE_DIR"] = mkdtempSync(join(tmpdir(), "adv-push-"));
-process.env["AGENT_DIFF_PUSH_INSECURE"] = "1";
+process.env["AGENT_DECK_STATE_DIR"] = mkdtempSync(join(tmpdir(), "adv-push-"));
+process.env["AGENT_DECK_PUSH_INSECURE"] = "1";
 const { encrypt, send, subscribe, subscribers, vapid, vapidAuthorization } = await import("../src/push.ts");
 const { browser, decrypt, pushService } = await import("./push-browser.ts");
 

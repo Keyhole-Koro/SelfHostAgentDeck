@@ -26,7 +26,7 @@ case "$1 $2" in
 esac
 `);
     chmodSync(gh, 0o755);
-    process.env["AGENT_DIFF_GH"] = gh;
+    process.env["AGENT_DECK_GH"] = gh;
     const r = await ciFailure("https://github.com/o/r/pull/7");
     assert.deepEqual(r.checks.map((c) => c.name), ["test", "test (22)"]);
     assert.equal(r.log, "── test › Run tests\nExpected 1, got 2", "one log per run, not per job");

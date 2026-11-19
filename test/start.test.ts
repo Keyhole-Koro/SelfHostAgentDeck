@@ -27,7 +27,7 @@ esac
 `,
 );
 chmodSync(fake, 0o755);
-process.env["AGENT_DIFF_HERDR"] = fake;
+process.env["AGENT_DECK_HERDR"] = fake;
 const { agentArgs, checkStart, startSession } = await import("../src/start.ts");
 const calls = () => readFileSync(log, "utf8").trim().split("\n").filter((l) => !l.startsWith("agent|list"));
 

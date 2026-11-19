@@ -8,7 +8,7 @@ export interface Session {
   cwd: string | undefined;
   firstAt: number; // ms
   lastAt: number; // ms
-  /** Where the transcript lives, for `agent-diff show`. */
+  /** Where the transcript lives, for `agent-deck show`. */
   source: string;
 }
 
@@ -18,7 +18,7 @@ export interface FileEvent {
   path: string; // absolute
   at: number; // ms
   kind: "edit" | "write" | "patch" | "delete";
-  /** "hook": recorded by agent-diff's hook (exact); otherwise read from a transcript. */
+  /** "hook": recorded by agent-deck's hook (exact); otherwise read from a transcript. */
   source?: "hook";
   /** Text the session wrote into the file (new_string, file content, + lines of a patch). */
   added: string;

@@ -1,4 +1,4 @@
-# Publishes agent-diff-viewer to npm when the publish branch is pushed and package.json has a
+# Publishes agent-deck to npm when the publish branch is pushed and package.json has a
 # version that is not on npm yet. Otherwise it does nothing.
 #
 # Uses npm trusted publishing (OIDC): no npm token is stored anywhere, and the package gets a
@@ -31,9 +31,10 @@ jobs:
       - id: version
         name: Is this version on npm yet?
         run: |
+          name=$(node -p "require('./package.json').name")
           version=$(node -p "require('./package.json').version")
           echo "version=${version}" >> "$GITHUB_OUTPUT"
-          if npm view "agent-diff-viewer@${version}" version >/dev/null 2>&1; then
+          if npm view "${name}@${version}" version >/dev/null 2>&1; then
             echo "new=false" >> "$GITHUB_OUTPUT"
             echo "${version} is already on npm; nothing to publish."
           else

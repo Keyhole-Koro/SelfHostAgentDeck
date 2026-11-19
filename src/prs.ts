@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { env } from "./env.ts";
 
 /**
  * The state of the pull requests sessions opened, from `gh pr view`: open, merged or closed,
@@ -39,7 +40,7 @@ const waiting: (() => void)[] = [];
 
 function gh(args: string[]): Promise<string> {
   return new Promise((resolve, reject) => {
-    execFile(process.env["AGENT_DIFF_GH"] || "gh", args, { timeout: 20_000, maxBuffer: 8 * 1024 * 1024 }, (err, stdout) => (err ? reject(err) : resolve(stdout)));
+    execFile(env("GH") || "gh", args, { timeout: 20_000, maxBuffer: 8 * 1024 * 1024 }, (err, stdout) => (err ? reject(err) : resolve(stdout)));
   });
 }
 

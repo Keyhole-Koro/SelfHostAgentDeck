@@ -12,31 +12,33 @@ import { statusLineFor } from "./statusline.ts";
 import { bold, cyan, dim, green, red, when, yellow } from "./term.ts";
 import type { Session, Transcripts } from "./types.ts";
 
-const HELP = `agent-diff — which Claude Code or Codex session made each uncommitted change
+const HELP = `agent-deck — every Claude Code and Codex session on one page, and on your phone: what
+waits on you, the conversation, one-tap answers, notifications, and who changed what
 
-  agent-diff                 Uncommitted changes grouped by the session that made them
-  agent-diff --by-file       The same, one line per file
-  agent-diff show <session>  The hunks a session made, as a diff
-  agent-diff add <session>   Stage exactly that session's changes (whole files and single hunks)
-  agent-diff view            Browse it all in a local web page (127.0.0.1; --port to pick one)
-  agent-diff inbox           Running sessions, in every repository, that wait on you
-                             (--view: the same as a web page that refreshes itself;
-                             --watch: report each session that starts waiting, --notify: on the
+  agent-deck inbox --view    The page: every running session, to read, answer and start them
+                             (127.0.0.1; --remote <origin> also serves it to your phone)
+  agent-deck                 Uncommitted changes grouped by the session that made them
+  agent-deck --by-file       The same, one line per file
+  agent-deck show <session>  The hunks a session made, as a diff
+  agent-deck add <session>   Stage exactly that session's changes (whole files and single hunks)
+  agent-deck view            The page, in a repository: also the changes of sessions that ended
+  agent-deck inbox           Running sessions, in every repository, that wait on you
+                             (--watch: report each session that starts waiting, --notify: on the
                              desktop too; --publish: put a private snapshot online with the
                              SelfHostArtifacts \`artifact\` CLI, to check from your phone)
-  agent-diff later <session> Take a session off the list for a while (--until 2h, tomorrow, 9:00)
-  agent-diff done <session>  Take a session off the list until it does something new
-  agent-diff unhold <session>  Put it back
-  agent-diff remote pair     A one-time link (and QR code) to add a phone that opens the page at
+  agent-deck later <session> Take a session off the list for a while (--until 2h, tomorrow, 9:00)
+  agent-deck done <session>  Take a session off the list until it does something new
+  agent-deck unhold <session>  Put it back
+  agent-deck remote pair     A one-time link (and QR code) to add a phone that opens the page at
                              the --remote origin and signs in with a passkey
-  agent-diff remote devices | revoke <id> | log   The devices added, removing one, what they did
-  agent-diff cleanup         Idle sessions and worktrees nobody uses, with the commands to close
+  agent-deck remote devices | revoke <id> | log   The devices added, removing one, what they did
+  agent-deck cleanup         Idle sessions and worktrees nobody uses, with the commands to close
                              or remove them (nothing is removed for you)
-  agent-diff statusline      One line for Claude Code's status line: the other sessions that wait
-  agent-diff install         Record every write as it happens (hooks for Claude Code and Codex),
+  agent-deck statusline      One line for Claude Code's status line: the other sessions that wait
+  agent-deck install         Record every write as it happens (hooks for Claude Code and Codex),
                              and teach the agents to commit only their own changes (a skill);
                              --statusline also shows the waiting sessions in Claude Code's status line
-  agent-diff uninstall       Remove all of it
+  agent-deck uninstall       Remove all of it
 
 Options
   -C <dir>         Run in another repository
@@ -152,7 +154,7 @@ function add(loaded: Loaded, key: string, dryRun: boolean): void {
 function installCommand(command: "install" | "uninstall", only: string | undefined, statusLine: boolean): void {
   if (command === "install" && statusLine) {
     const r = installStatusLine();
-    if (r.skipped) console.log(`- Claude Code: your status line already runs ${r.skipped}; left as it is. Add \`agent-diff statusline\` to it yourself.`);
+    if (r.skipped) console.log(`- Claude Code: your status line already runs ${r.skipped}; left as it is. Add \`agent-deck statusline\` to it yourself.`);
     else console.log(`${r.changed ? "✓" : "-"} Claude Code: ${r.changed ? "status line set in" : "status line already set in"} ${r.file}`);
   }
   if (command === "uninstall") {
@@ -176,7 +178,7 @@ function installCommand(command: "install" | "uninstall", only: string | undefin
       if (removed.length) console.log(`✓ ${name}: skill ${removed.join(", ")} removed`);
     }
     if (agent === "codex" && command === "install" && r.changed) {
-      console.log(dim("  In Codex, run /hooks once and trust the agent-diff hook; until then it records nothing."));
+      console.log(dim("  In Codex, run /hooks once and trust the agent-deck hook; until then it records nothing."));
     }
   }
 }
@@ -265,10 +267,10 @@ function main(): void {
     void serve({ root, days, staleAfter, port: o.port ? Number(o.port) : 0, herdr: o.herdr, ...(remote && { remote }) }).then(
       (served) => {
         const query = o.since ? `&since=${encodeURIComponent(o.since)}` : o.base ? `&base=${encodeURIComponent(o.base)}` : "";
-        console.log(`Agent Diff${root ? ` for ${root}` : ""}\n\n  ${served.url}${query}\n\nOpen it in a browser. Ctrl-C to stop.`);
+        console.log(`Agent Deck${root ? ` for ${root}` : ""}\n\n  ${served.url}${query}\n\nOpen it in a browser. Ctrl-C to stop.`);
         if (served.remote) {
           console.log(`\nRemote: ${served.remote.origin} (point the tunnel at http://127.0.0.1:${served.remote.port}).`);
-          console.log(`Add a device with: agent-diff remote pair`);
+          console.log(`Add a device with: agent-deck remote pair`);
         }
       },
       (e: Error) => {
@@ -310,20 +312,20 @@ function main(): void {
       else printBySession(transcripts, attributions);
       return;
     case "show":
-      if (!arg) throw new Error("Usage: agent-diff show <session|--self>");
+      if (!arg) throw new Error("Usage: agent-deck show <session|--self>");
       show(transcripts, attributions, findSession(transcripts, arg));
       return;
     case "add":
-      if (!arg) throw new Error("Usage: agent-diff add <session|--self>");
+      if (!arg) throw new Error("Usage: agent-deck add <session|--self>");
       add(loaded, findSession(transcripts, arg), !!o["dry-run"]);
       return;
     default:
-      throw new Error(`Unknown command "${command}". Run agent-diff --help.`);
+      throw new Error(`Unknown command "${command}". Run agent-deck --help.`);
   }
 }
 
 /**
- * `agent-diff hook --agent <claude|codex>`, run by the agents around every tool call. It reads the
+ * `agent-deck hook --agent <claude|codex>`, run by the agents around every tool call. It reads the
  * call from stdin, records it, and stays silent and successful whatever happens.
  */
 async function hook(): Promise<void> {

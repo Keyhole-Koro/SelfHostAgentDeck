@@ -8,7 +8,7 @@ import { prStatuses, refreshPr } from "./prs.ts";
 import { publishSnapshot } from "./publish.ts";
 import { ago, bold, cyan, dim, oneLine, pad, red, yellow } from "./term.ts";
 
-/** `agent-diff inbox` and the commands around it, in the terminal. */
+/** `agent-deck inbox` and the commands around it, in the terminal. */
 
 export function loadInbox(staleAfter?: number): Inbox {
   const inbox = readInbox({ staleAfter });
@@ -89,7 +89,7 @@ export function printInbox(inbox: Inbox, all: boolean): void {
 
 const mb = (bytes: number) => `${Math.round(bytes / 1e6)} MB`;
 
-/** `agent-diff cleanup`: idle sessions and worktrees nobody uses, with the commands to close or remove them. */
+/** `agent-deck cleanup`: idle sessions and worktrees nobody uses, with the commands to close or remove them. */
 export function printCleanup(staleAfter?: number): void {
   const inbox = loadInbox(staleAfter);
   const projects = new Set<string>();
@@ -133,12 +133,12 @@ export function findItem(inbox: Inbox, arg: string): InboxItem {
   const [agent, prefix] = arg.includes(":") ? (arg.split(":", 2) as [string, string]) : [undefined, arg];
   const hits = inbox.items.filter((i) => (!agent || i.agent === agent) && (i.id.startsWith(prefix) || i.jobId === prefix));
   if (hits.length === 1) return hits[0]!;
-  if (!hits.length) throw new Error(`No running session matches "${arg}". agent-diff inbox --all lists them.`);
+  if (!hits.length) throw new Error(`No running session matches "${arg}". agent-deck inbox --all lists them.`);
   throw new Error(`"${arg}" matches ${hits.length} sessions: ${hits.map((h) => h.id.slice(0, 12)).join(", ")}. Give more of the id.`);
 }
 
 export function holdCommand(kind: HoldKind | "unhold", arg: string | undefined, until: string | undefined): void {
-  if (!arg) throw new Error(`Usage: agent-diff ${kind} <session>${kind === "later" ? " [--until 2h|tomorrow|9:00]" : ""}`);
+  if (!arg) throw new Error(`Usage: agent-deck ${kind} <session>${kind === "later" ? " [--until 2h|tomorrow|9:00]" : ""}`);
   const item = findItem(loadInbox(), arg);
   if (kind === "unhold") {
     console.log(release(item.key) ? `${label(item)} waits again.` : `${label(item)} was not on hold.`);

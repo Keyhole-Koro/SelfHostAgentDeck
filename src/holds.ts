@@ -1,14 +1,15 @@
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { Inbox, InboxItem } from "./inbox.ts";
+import { env } from "./env.ts";
 
 /**
  * "Later" and "Done": take a session off the waiting list until it moves on. A hold remembers
  * the state the session was in; as soon as the session does something new (its state or the time
  * it entered it changes), or the "later" time comes, the hold is dropped and it waits again.
  *
- * Holds live in $XDG_STATE_HOME/agent-diff/holds.json (~/.local/state/agent-diff by default).
+ * Holds live in $XDG_STATE_HOME/agent-deck/holds.json (~/.local/state/agent-deck by default).
  */
 
 export type HoldKind = "later" | "done";
@@ -26,7 +27,19 @@ export interface Hold {
 export type Holds = Record<string, Hold>;
 
 export function stateDir(): string {
-  return process.env["AGENT_DIFF_STATE_DIR"] || join(process.env["XDG_STATE_HOME"] || join(homedir(), ".local", "state"), "agent-diff");
+  const set = env("STATE_DIR");
+  if (set) return set;
+  const base = process.env["XDG_STATE_HOME"] || join(homedir(), ".local", "state");
+  const dir = join(base, "agent-deck");
+  // Agent Deck was agent-diff: its state (holds, the page's token, devices) moves over, once.
+  if (!existsSync(dir) && existsSync(join(base, "agent-diff"))) {
+    try {
+      renameSync(join(base, "agent-diff"), dir);
+    } catch {
+      return join(base, "agent-diff");
+    }
+  }
+  return dir;
 }
 
 const holdsFile = () => join(stateDir(), "holds.json");

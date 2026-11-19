@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { env } from "./env.ts";
 
 /**
  * Why a pull request's CI failed, to hand to the session that opened it: the failing checks
@@ -23,7 +24,7 @@ const MAX_CHARS = 16_000;
 /** gh's output; `gh pr checks` exits non-zero when checks fail, and still prints them. */
 function gh(args: string[], timeout = 30_000): Promise<string> {
   return new Promise((resolve, reject) => {
-    execFile(process.env["AGENT_DIFF_GH"] || "gh", args, { timeout, maxBuffer: 32 * 1024 * 1024 }, (err, stdout, stderr) => {
+    execFile(env("GH") || "gh", args, { timeout, maxBuffer: 32 * 1024 * 1024 }, (err, stdout, stderr) => {
       if (stdout) return resolve(stdout);
       reject(err ? new Error(String(stderr || err.message).trim().split("\n")[0]) : new Error("gh printed nothing"));
     });

@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
 import type { Inbox, InboxItem } from "./inbox.ts";
+import { env } from "./env.ts";
 
 /**
  * Notifications when a session starts waiting on you: it asks something, or finishes a turn.
@@ -44,13 +45,13 @@ export function newlyWaiting(prev: Inbox | undefined, next: Inbox): Alert[] {
 }
 
 /**
- * Shows a desktop notification: notify-send on Linux, osascript on macOS. $AGENT_DIFF_NOTIFY, if
+ * Shows a desktop notification: notify-send on Linux, osascript on macOS. $AGENT_DECK_NOTIFY, if
  * set, is run instead with the title and the body as its two arguments.
  */
 export function desktopNotify(alert: Alert): void {
   const quiet = () => {};
-  const custom = process.env["AGENT_DIFF_NOTIFY"];
+  const custom = env("NOTIFY");
   if (custom) execFile(custom, [alert.title, alert.body], quiet);
-  else if (process.platform === "linux") execFile("notify-send", ["-a", "agent-diff", alert.title, alert.body], quiet);
+  else if (process.platform === "linux") execFile("notify-send", ["-a", "agent-deck", alert.title, alert.body], quiet);
   else if (process.platform === "darwin") execFile("osascript", ["-e", `display notification ${JSON.stringify(alert.body)} with title ${JSON.stringify(alert.title)}`], quiet);
 }

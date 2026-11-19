@@ -16,7 +16,7 @@ function item(key: string, state: InboxItem["state"], since = NOW - 1000, extra:
 const inbox = (...items: InboxItem[]): Inbox => ({ generatedAt: NOW, staleAfter: 864e5, items });
 
 beforeEach(() => {
-  process.env["AGENT_DIFF_STATE_DIR"] = mkdtempSync(join(tmpdir(), "adv-state-"));
+  process.env["AGENT_DECK_STATE_DIR"] = mkdtempSync(join(tmpdir(), "adv-state-"));
 });
 
 describe("holds", () => {

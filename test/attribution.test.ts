@@ -217,7 +217,7 @@ describe("view", () => {
       const res = await fetch(`${origin}/api/view`, { headers: { "x-token": hash.slice(3) } });
       const view = (await res.json()) as { sessions: { key: string; files: { path: string }[] }[] };
       assert.deepEqual(view.sessions.map((s) => [s.key, s.files.map((f) => f.path)]), [["claude:writer", ["new.md"]]]);
-      assert.match(await (await fetch(`${origin}/`)).text(), /<title>Agent Diff<\/title>/);
+      assert.match(await (await fetch(`${origin}/`)).text(), /<title>Agent Deck<\/title>/);
     } finally {
       child.kill();
     }
