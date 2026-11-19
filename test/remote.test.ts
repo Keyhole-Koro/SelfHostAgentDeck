@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
+import { createHmac } from "node:crypto";
 import { mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { request } from "node:http";
 import { tmpdir } from "node:os";
@@ -284,5 +285,38 @@ describe("remote: closed doors", () => {
     const r = await call("POST", "/api/remote/pair", { body: {}, cookie: session, headers: page() });
     assert.equal(r.status, 403);
     assert.match(r.json.error, /from your computer/);
+  });
+
+  it("takes a signed cookie only for what it was made for: a session or a passkey request is no passkey check", async () => {
+    const passkey = await softPasskey();
+    const all = await pairDevice(passkey, "Fourth phone");
+    const value = (c: string) => c.slice(c.indexOf("=") + 1);
+    const own = all.split("; ").find((c) => c.startsWith("agent_deck_session="))!;
+    const fresh = all.split("; ").find((c) => c.startsWith("agent_deck_confirmed="))!;
+    const act = (cookie: string) => call("POST", "/api/herdr/prompt", { body: { key: "claude:s1", text: "hi" }, cookie, headers: page() });
+    assert.match((await act(all)).json.error, /herdr pane/, "the check made when pairing lets it act");
+
+    const replayed = await act(`${own}; agent_deck_confirmed=${value(own)}`);
+    assert.equal(replayed.status, 403, "the session cookie, replayed as the passkey check");
+    assert.equal(replayed.json.confirm, true);
+    const shell = await call("POST", "/api/command", { body: { key: "claude:s1", command: "touch pwned" }, cookie: `${own}; agent_deck_confirmed=${value(own)}`, headers: page() });
+    assert.equal(shell.status, 403, "no shell command with it either");
+
+    const asked = await call("POST", "/auth/confirm/options", { cookie: own, headers: page() });
+    const request = asked.cookies.find((c) => c.startsWith("agent_deck_webauthn="))!;
+    const posing = await act(`${own}; agent_deck_confirmed=${value(request)}`);
+    assert.equal(posing.status, 403, "a passkey request is not a passkey check");
+    assert.equal(posing.json.confirm, true);
+    assert.equal((await call("GET", "/api/inbox", { cookie: `agent_deck_session=${value(request)}`, headers: page() })).status, 401, "nor a session");
+    assert.equal((await call("GET", "/api/inbox", { cookie: `agent_deck_session=${value(fresh)}`, headers: page() })).status, 401, "nor is the passkey check");
+
+    // A session signed before cookies said what they are for: still signed in, but it cannot act.
+    const secret = Buffer.from(readFileSync(join(state, "remote", "secret"), "utf8").trim(), "hex");
+    const body = Buffer.from(JSON.stringify({ pk: passkey.id, exp: Math.floor(Date.now() / 1000) + 3600 })).toString("base64url");
+    const legacy = `agent_deck_session=${body}.${createHmac("sha256", secret).update(body).digest("base64url")}`;
+    assert.equal((await call("GET", "/api/inbox", { cookie: legacy, headers: page() })).status, 200, "an older session cookie still signs in");
+    const old = await act(`${legacy}; agent_deck_confirmed=${value(legacy)}`);
+    assert.equal(old.status, 403, "but does not stand in for the passkey check");
+    assert.equal(old.json.confirm, true);
   });
 });

@@ -304,14 +304,25 @@ export async function verifyConfirm(cfg: RemoteConfig, ceremonyToken: string | u
   return verifyAssertion(cfg, c.challenge, response);
 }
 
+/**
+ * What a signed session or check is for. Every token is signed with the same key, so each says
+ * its kind and is taken for that only: a session cookie (30 days) or a passkey request is never a
+ * passkey check.
+ */
+interface Signed {
+  kind?: "session" | "confirmed" | Ceremony["kind"];
+  pk?: string;
+  exp: number;
+}
+
 /** A cookie that says this device's passkey was checked a moment ago. */
 export function confirmedCookie(cfg: RemoteConfig, passkey: Passkey): string {
-  return cookie(cfg, cookieNames(cfg).fresh, sign({ pk: passkey.id, exp: Math.floor(Date.now() / 1000) + CONFIRM_SECONDS }), CONFIRM_SECONDS);
+  return cookie(cfg, cookieNames(cfg).fresh, sign({ kind: "confirmed", pk: passkey.id, exp: Math.floor(Date.now() / 1000) + CONFIRM_SECONDS }), CONFIRM_SECONDS);
 }
 
 export function confirmed(token: string | undefined, passkey: Passkey | undefined): boolean {
-  const c = verify<{ pk: string; exp: number }>(token);
-  return !!c && !!passkey && c.pk === passkey.id;
+  const c = verify<Signed>(token);
+  return !!c && c.kind === "confirmed" && !!passkey && c.pk === passkey.id;
 }
 
 async function verifyAssertion(cfg: RemoteConfig, challenge: string, response: AuthenticationResponseJSON): Promise<Passkey> {
@@ -335,13 +346,17 @@ async function verifyAssertion(cfg: RemoteConfig, challenge: string, response: A
 
 export function newSession(passkey: Passkey): { value: string; maxAge: number } {
   const maxAge = SESSION_DAYS * 86400;
-  return { value: sign({ pk: passkey.id, exp: Math.floor(Date.now() / 1000) + maxAge }), maxAge };
+  return { value: sign({ kind: "session", pk: passkey.id, exp: Math.floor(Date.now() / 1000) + maxAge }), maxAge };
 }
 
-/** The passkey a session cookie stands for, if it is valid and the passkey still registered. */
+/**
+ * The passkey a session cookie stands for, if it is valid and the passkey still registered. A
+ * session signed before tokens said their kind (none) still counts as one, until it expires.
+ */
 export function sessionPasskey(token: string | undefined): Passkey | undefined {
-  const s = verify<{ pk: string; exp: number }>(token);
-  return s ? listPasskeys().find((p) => p.id === s.pk) : undefined;
+  const s = verify<Signed>(token);
+  if (!s || (s.kind !== undefined && s.kind !== "session")) return undefined;
+  return listPasskeys().find((p) => p.id === s.pk);
 }
 
 /** A readable default name for a new passkey, from the browser's user agent. */
