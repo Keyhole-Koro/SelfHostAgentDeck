@@ -52,9 +52,31 @@ header#top h1 { margin: 0; font-size: 16px; font-weight: 650; letter-spacing: -.
 .summary .urgent b { color: var(--urgent); }
 .tools { margin-left: auto; display: flex; flex-wrap: wrap; gap: 6px 8px; align-items: center; font-size: 12px; color: var(--muted); }
 .limits.high { color: var(--warn); font-weight: 600; }
-.tbtn { border: 1px solid var(--line); background: transparent; border-radius: 8px; padding: 3px 10px; cursor: pointer; font-size: 13px; }
-.tbtn:hover { background: var(--hover); }
-.tbtn[aria-pressed="true"] { background: var(--accent-soft); border-color: transparent; color: var(--accent); }
+/* Icon buttons, a segmented switch and menus, instead of rows of boxed buttons. */
+.icon-btn { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 32px; height: 32px; padding: 0; border: 0; border-radius: 8px; background: transparent; color: var(--muted); cursor: pointer; }
+.icon-btn:hover { background: var(--hover); color: var(--text); }
+.icon-btn[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent); }
+.icon-btn svg, .seg svg, .new-btn svg, .send-btn svg { display: block; }
+.seg { display: inline-flex; align-items: center; gap: 2px; padding: 2px; border-radius: 9px; background: var(--hover); }
+.seg button { display: inline-flex; align-items: center; justify-content: center; height: 26px; min-width: 30px; padding: 0 6px; border: 0; border-radius: 7px; background: transparent; color: var(--muted); cursor: pointer; font-size: 12px; }
+.seg button:hover { color: var(--text); }
+.seg button[aria-pressed="true"] { background: var(--bg); color: var(--text); box-shadow: 0 1px 2px rgba(0, 0, 0, .15); }
+.seg .seg-sep { width: 1px; height: 16px; background: var(--line); margin: 0 2px; }
+.new-btn { display: inline-flex; align-items: center; gap: 5px; padding: 4px 12px 4px 8px; font-size: 13px; }
+.menu { position: relative; }
+.menu > summary { list-style: none; }
+.menu > summary::-webkit-details-marker { display: none; }
+.menu[open] > summary { background: var(--hover); color: var(--text); }
+.menu-list { position: absolute; right: 0; top: calc(100% + 6px); z-index: 30; min-width: 200px; padding: 6px; display: grid; gap: 2px; border: 1px solid var(--line); border-radius: 12px; background: var(--bg); box-shadow: 0 10px 28px rgba(0, 0, 0, .18); }
+.menu-list button { display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 10px; border: 0; border-radius: 8px; background: none; color: var(--text); text-align: left; font-size: 14px; cursor: pointer; white-space: nowrap; }
+.menu-list button:hover { background: var(--hover); }
+.menu-list button[aria-pressed="true"] { color: var(--accent); }
+.menu-list button svg { color: var(--muted); }
+.menu-note { margin-top: 4px; padding: 6px 10px 2px; border-top: 1px solid var(--line); font-size: 12px; color: var(--faint); }
+.menu-note:empty { display: none; }
+.send-btn { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 34px; height: 34px; padding: 0; border: 0; border-radius: 50%; background: var(--accent); color: var(--on-accent); cursor: pointer; }
+.send-btn:hover { filter: brightness(1.08); }
+.send-btn.small { width: 30px; height: 30px; }
 
 /* ---------------------------------------------------------------- columns */
 .app { flex: 1; min-height: 0; display: grid; grid-template-columns: 300px minmax(0, 1fr) 340px; }
@@ -65,7 +87,7 @@ body.special aside#side { display: none; }
 body.special main#main { grid-column: 2 / -1; }
 @media (min-width: 1680px) { .app { grid-template-columns: 320px minmax(0, 1fr) 400px; } :root { --col: 940px; } }
 @media (max-width: 1279px) { .app { grid-template-columns: 280px minmax(0, 1fr); } aside#side { display: none; } }
-@media (max-width: 1023px) { .app { grid-template-columns: 248px minmax(0, 1fr); } }
+@media (max-width: 1023px) { .app { grid-template-columns: 248px minmax(0, 1fr); } .tab-meta { display: none; } }
 
 /* ---------------------------------------------------------------- session list */
 .project { display: flex; align-items: center; gap: 8px; width: 100%; border: 0; background: none; cursor: pointer; text-align: left; padding: 14px 18px 6px; font-size: 13px; font-weight: 650; color: var(--muted); letter-spacing: .01em; }
@@ -110,9 +132,10 @@ body.special main#main { grid-column: 2 / -1; }
 kbd { font-family: var(--mono); font-size: 11px; border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; }
 
 /* ---------------------------------------------------------------- session head and tabs */
-.shead { flex: none; padding: 14px 24px 0; }
+.shead { flex: none; padding: 10px 16px 4px 24px; }
 .shead-row { display: flex; align-items: center; gap: 10px; min-width: 0; }
-.back { display: none; flex: none; border: 0; background: none; font-size: 26px; line-height: 1; padding: 0 6px 2px 0; margin-left: -4px; cursor: pointer; color: var(--accent); }
+.head-actions { margin-left: auto; display: flex; align-items: center; gap: 2px; flex: none; }
+.back { display: none; margin-left: -8px; color: var(--accent); }
 .shead h2 { margin: 0; font-size: 19px; font-weight: 650; letter-spacing: -.01em; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pill { flex: none; font-size: 12px; font-weight: 650; border-radius: 10px; padding: 1px 9px; background: var(--hover); color: var(--muted); white-space: nowrap; }
 .pill.needs-answer { background: var(--urgent-soft); color: var(--urgent); }
@@ -120,7 +143,10 @@ kbd { font-family: var(--mono); font-size: 11px; border: 1px solid var(--line); 
 .meta { color: var(--muted); font-size: 13px; display: flex; flex-wrap: wrap; gap: 2px 14px; align-items: center; margin-top: 4px; }
 .meta .path { font-family: var(--mono); font-size: 12px; overflow-wrap: anywhere; }
 .actions { margin: 10px 0 0; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
-.tabs { flex: none; display: flex; gap: 2px; padding: 10px 20px 0; border-bottom: 1px solid var(--line); overflow-x: auto; scrollbar-width: none; }
+.tabs-row { flex: none; display: flex; align-items: flex-end; gap: 16px; padding: 0 16px 0 20px; border-bottom: 1px solid var(--line); min-width: 0; }
+.tab-meta { margin-left: auto; min-width: 0; display: flex; gap: 12px; padding-bottom: 10px; font-size: 12px; color: var(--faint); white-space: nowrap; overflow: hidden; }
+.tab-meta .agent { font-size: 12px; }
+.tabs { flex: none; display: flex; gap: 2px; overflow-x: auto; scrollbar-width: none; }
 .tabs button { border: 0; background: none; padding: 8px 10px 9px; font-size: 14px; color: var(--muted); cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px; white-space: nowrap; }
 .tabs button:hover { color: var(--text); }
 .tabs button[aria-selected="true"] { color: var(--text); font-weight: 600; border-bottom-color: var(--accent); }
@@ -219,8 +245,13 @@ button.opt:hover { border-color: var(--accent); color: var(--accent); }
 .chip-btn { flex: none; border: 1px solid var(--line); background: transparent; border-radius: 999px; padding: 4px 12px; font-size: 13px; cursor: pointer; white-space: nowrap; }
 .chip-btn:hover { background: var(--hover); }
 .chip-btn.ghost { color: var(--muted); }
+.quick-row { display: flex; gap: 6px; align-items: center; margin-bottom: 8px; }
+.quick-row .quick { flex: 1; min-width: 0; margin-bottom: 0; }
+.tune-panel { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 0 0 8px; font-size: 12px; color: var(--muted); }
+.tune-panel .lbl { margin-left: 4px; }
 .screen { margin: 10px 0 0; padding: 10px 12px; background: var(--code-bg); border-radius: 8px; font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 28vh; overflow-y: auto; }
-.composer { display: flex; gap: 8px; align-items: flex-end; border: 1px solid var(--line); background: var(--field); border-radius: 14px; padding: 6px 6px 6px 12px; }
+.composer { display: flex; gap: 4px; align-items: flex-end; border: 1px solid var(--line); background: var(--field); border-radius: 16px; padding: 5px; }
+.composer textarea { padding: 6px 4px; }
 .composer:focus-within { border-color: var(--accent); }
 .composer textarea { flex: 1; min-width: 0; border: 0; background: transparent; resize: none; outline: none; padding: 5px 0; line-height: 1.5; max-height: 35vh; }
 .hint { margin: 6px 2px 0; }
@@ -366,11 +397,6 @@ dialog h2 { margin: 0 0 6px; font-size: 17px; }
 dialog p { margin: 0 0 14px; color: var(--muted); font-size: 14px; }
 
 /* ---------------------------------------------------------------- layouts: the switch, cards, Deck, Grid, Pop out */
-.layouts { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
-.layouts button { border: 0; background: transparent; padding: 3px 10px; font-size: 13px; cursor: pointer; color: var(--muted); }
-.layouts button + button { border-left: 1px solid var(--line); }
-.layouts button:hover { color: var(--text); background: var(--hover); }
-.layouts button[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent); }
 .layout-root { display: none; flex: 1; min-height: 0; overflow: auto; }
 body:not([data-layout="focus"]) .app { display: none; }
 body:not([data-layout="focus"]) .layout-root { display: block; }
@@ -434,15 +460,16 @@ body.pip { height: auto; min-height: 100vh; overflow: auto; display: block; }
   .deck-cols > .card { width: calc(100vw - 16px); }
   .grid-tiles { grid-template-columns: minmax(0, 1fr); padding: 8px; gap: 8px; }
   .grid-tiles > .card { height: auto; max-height: 75vh; }
-  .layouts button { padding: 3px 8px; }
   body.special main#main { grid-column: auto; }
   .back { display: inline-flex; }
-  .shead { padding: 10px 16px 0; }
+  .shead { padding: 8px 10px 2px 16px; }
+  .new-btn .lbl { display: none; }
+  .new-btn { padding: 4px 8px; }
   .shead h2 { font-size: 17px; }
   .meta .path { display: none; }
   .actions { margin-top: 8px; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; padding-bottom: 2px; }
   .actions .btn { padding: 3px 11px; font-size: 13px; }
-  .tabs { padding: 6px 10px 0; }
+  .tabs-row { padding: 0 10px; }
   .col { padding: 14px 16px 32px; }
   .dock .col { padding: 8px 12px calc(10px + env(safe-area-inset-bottom)); }
   .bubble { max-width: 88%; }
@@ -459,20 +486,22 @@ body.pip { height: auto; min-height: 100vh; overflow: auto; display: block; }
   <div class="summary" id="summary"></div>
   <div class="tools">
     <span class="limits optional" id="limits"></span>
-    <div class="layouts" id="layouts" role="group" aria-label="Layout"></div>
-    <button class="tbtn" id="new" title="Start Claude Code or Codex in a new herdr tab">New</button>
-    <button class="tbtn" id="activity" title="What happened in every session">Activity</button>
-    <button class="tbtn" id="notify" aria-pressed="false" title="A notification when a session waits on you, also with the page closed">Notify</button>
-    <button class="tbtn" id="cleanup" title="Idle sessions and worktrees nobody uses">Clean up</button>
-    <button class="tbtn" id="remote" title="Use this page from your phone">Remote</button>
-    <span class="optional" id="updated"></span>
+    <div class="seg" id="layouts" role="group" aria-label="Layout"></div>
+    <button class="btn primary new-btn" id="new" title="Start Claude Code or Codex in a new herdr tab"><span data-icon="plus"></span><span class="lbl">New session</span></button>
+    <button class="icon-btn" id="activity" title="Activity: what happened in every session" aria-label="Activity" data-icon="activity"></button>
+    <button class="icon-btn" id="notify" aria-pressed="false" title="Notifications when a session waits on you, also with the page closed" aria-label="Notifications" data-icon="bell"></button>
+    <details class="menu" id="more"><summary class="icon-btn" title="More" aria-label="More" data-icon="more"></summary><div class="menu-list">
+      <button id="cleanup" data-icon="broom" title="Idle sessions and worktrees nobody uses">Clean up</button>
+      <button id="remote" data-icon="phone" title="Use this page from your phone">Remote: your phone</button>
+      <div class="menu-note" id="updated"></div>
+    </div></details>
   </div>
 </header>
 <div class="app" id="app">
   <nav id="nav" aria-label="Sessions"><div class="nav-empty">Looking for sessions…</div></nav>
   <main id="main">
     <div class="shead" id="head"></div>
-    <div class="tabs" id="tabs" role="tablist"></div>
+    <div class="tabs-row" id="tabs-row"><div class="tabs" id="tabs" role="tablist"></div><div class="tab-meta" id="tab-meta"></div></div>
     <section class="pane" id="pane-chat">
       <div class="chat" id="chat"><div class="col" id="chat-col"></div></div>
       <div class="dock"><div class="col" id="dock"></div></div>
@@ -542,6 +571,33 @@ const wide = matchMedia("(min-width: 1280px)");
 let pushed = false; // a session was opened over the list (phones), so Back returns to it
 
 const $ = (id) => document.getElementById(id);
+/** Line icons, drawn for this page (24 × 24, stroked with the text colour). */
+const ICONS = {
+  plus: '<path d="M12 5v14M5 12h14"/>',
+  activity: '<circle cx="5" cy="6" r="1.3"/><circle cx="5" cy="12" r="1.3"/><circle cx="5" cy="18" r="1.3"/><path d="M9.5 6H20M9.5 12H20M9.5 18H16"/>',
+  bell: '<path d="M6.5 16v-5a5.5 5.5 0 0 1 11 0v5l1.5 2h-14z"/><path d="M10 21h4"/>',
+  more: '<circle cx="5.5" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="18.5" cy="12" r="1.2"/>',
+  focus: '<rect x="3.5" y="4.5" width="17" height="15" rx="2"/><path d="M9 4.5v15"/>',
+  deck: '<rect x="3.5" y="4.5" width="4.6" height="15" rx="1.2"/><rect x="9.7" y="4.5" width="4.6" height="15" rx="1.2"/><rect x="15.9" y="4.5" width="4.6" height="15" rx="1.2"/>',
+  grid: '<rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="7" rx="1.5"/><rect x="4" y="13" width="7" height="7" rx="1.5"/><rect x="13" y="13" width="7" height="7" rx="1.5"/>',
+  popout: '<rect x="3.5" y="5" width="17" height="14" rx="2"/><rect x="12" y="11.5" width="6.5" height="5" rx="1" fill="currentColor" stroke="none"/>',
+  clock: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>',
+  check: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
+  goto: '<path d="M14 4.5h5.5V10M19.5 4.5L11 13M17.5 14v5.5h-13v-13H10"/>',
+  send: '<path d="M12 19V5.5M6 11.5l6-6 6 6"/>',
+  stop: '<rect x="7" y="7" width="10" height="10" rx="1.5" fill="currentColor" stroke="none"/>',
+  back: '<path d="M15 18l-6-6 6-6"/>',
+  undo: '<path d="M9 14L4 9l5-5"/><path d="M4 9h10a6 6 0 0 1 0 12h-2"/>',
+  broom: '<path d="M15 3l-4.5 9M7 12h7l2.5 8.5H4.5z"/>',
+  phone: '<rect x="7" y="3" width="10" height="18" rx="2.2"/><path d="M11 17.5h2"/>',
+  tune: '<path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/>',
+};
+const icon = (name, size = 18) => `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[name] || ""}</svg>`;
+for (const el of document.querySelectorAll("[data-icon]")) el.insertAdjacentHTML("afterbegin", icon(el.dataset.icon));
+// A menu closes when you pick from it, or click elsewhere.
+document.addEventListener("click", (ev) => {
+  for (const m of document.querySelectorAll("details.menu[open]")) if (!m.contains(ev.target) || ev.target.closest(".menu-list button")) m.open = false;
+});
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 /** Escaped text with its web links made links: what you typed to a session. */
 const linkify = (s) => esc(s).replace(/https?:\/\/[\w\-.~:/?#[\]@!$&*+,;=%()]*[\w\-~/#@$&*+=%]/g, (u) => `<a href="${u}" target="_blank" rel="noopener noreferrer">${u}</a>`);
@@ -604,6 +660,7 @@ let tab = TABS.includes(stored("tab", "chat")) ? stored("tab", "chat") : "chat";
 const QUICK = /^ja\b/.test(navigator.language || "") ? ["続けて", "それで進めて", "コミットして", "テストを実行して"] : ["Continue", "Go ahead", "Commit your changes", "Run the tests"];
 let quick = stored("quick", QUICK);
 let keysOpen = false; // the keypad and the screen, under a question with choices
+let tuneOpen = false; // the model, effort and replies under the one-tap replies
 
 const headers = () => ({ "content-type": "application/json", "x-agent-deck": "1", ...(token && { "x-token": token }) });
 async function api(path, init = {}, again = false) {
@@ -953,36 +1010,37 @@ function paintHead(e) {
   const key = JSON.stringify(e ? { k: e.key, s: e.state, i: i && [i.title, i.name, i.cwd, i.since, i.jobId, i.herdr, i.hold, i.agent, i.model, Math.round((i.memory || 0) / 5e7)], x: e.session && e.session.lastAt } : null);
   if (key === shown.head) return;
   shown.head = key;
-  const back = `<button class="back" data-act="back" aria-label="Back to the sessions">‹</button>`;
+  const back = `<button class="icon-btn back" data-act="back" aria-label="Back to the sessions">${icon("back", 22)}</button>`;
+  const head = (title, pills = "", actions = "") => `<div class="shead-row">${back}<h2 title="${esc(title)}">${esc(title)}</h2>${pills}<div class="head-actions">${actions}</div></div><span class="note" id="act-note"></span>`;
   if (!e) {
-    $("head").innerHTML = `<div class="shead-row">${back}<h2>${inbox ? "No running sessions" : "Looking for sessions…"}</h2></div>`;
+    $("head").innerHTML = head(inbox ? "No running sessions" : "Looking for sessions…");
+    $("tab-meta").innerHTML = "";
     return;
   }
   if (e.key === "unknown") {
-    $("head").innerHTML = `<div class="shead-row">${back}<h2>Unattributed</h2></div><div class="meta"><span class="path">${esc(home.root)}</span><span>Edited by hand, by a tool, or by a session older than the transcripts read</span></div>`;
+    $("head").innerHTML = head("Unattributed");
+    $("tab-meta").innerHTML = `<span>Edited by hand, by a tool, or by a session older than the transcripts read</span>`;
     return;
   }
   if (e.session) {
     const s = e.session;
-    $("head").innerHTML = `<div class="shead-row">${back}<h2>${esc(s.title || "(untitled)")}</h2><span class="pill">Not running</span></div>
-      <div class="meta"><span class="agent ${s.agent}">${agentName(s.agent)}</span><span>${when(s.firstAt)} – ${when(s.lastAt)}</span></div>`;
+    $("head").innerHTML = head(s.title || "(untitled)", `<span class="pill">Not running</span>`);
+    $("tab-meta").innerHTML = `<span class="agent ${s.agent}">${agentName(s.agent)}</span><span>${when(s.firstAt)} – ${when(s.lastAt)}</span>`;
     return;
   }
-  const meta = [
-    `<span class="agent ${i.agent}">${agentName(i.agent)}</span>`,
-    i.title && i.title !== i.name ? `<span>${esc(i.name)}</span>` : "",
-    `<span class="path">${esc(i.cwd || "")}</span>`,
-    `<span title="${esc(new Date(i.since).toLocaleString())}">${ago(i.since)}</span>`,
-    i.model ? `<span title="Model">${esc(i.model)}</span>` : "",
-    i.herdr ? `<span title="herdr pane">herdr ${esc(i.herdr.pane)} · ${esc(i.herdr.status)}</span>` : "",
-  ].join("");
   const held = i.hold ? `<span class="pill">${i.hold.kind === "later" && i.hold.until ? `Later, until ${esc(when(i.hold.until))}` : "Done for now"}</span>` : "";
   let actions = "";
-  if (i.herdr) actions += `<button class="btn" data-act="focus">Go to its pane</button>`;
-  if (i.hold) actions += `<button class="btn" data-act="release">Back on the list</button>`;
-  else if (waiting(i) || i.state === "stale") actions += `<button class="btn" data-act="later" data-until="1h">Later (1 h)</button><button class="btn" data-act="later" data-until="tomorrow">Tomorrow</button><button class="btn" data-act="done" title="Off the list until it does something new">Done</button>`;
-  $("head").innerHTML = `<div class="shead-row">${back}<h2 title="${esc(nameOf(i))}">${esc(nameOf(i))}</h2><span class="pill ${i.state}">${STATE[i.state]}</span>${held}</div>
-    <div class="meta">${meta}</div>${actions ? `<div class="actions">${actions}<span class="note" id="act-note"></span></div>` : `<span class="note" id="act-note"></span>`}`;
+  if (i.hold) actions += `<button class="icon-btn" data-act="release" title="Back on the list" aria-label="Back on the list">${icon("undo")}</button>`;
+  else if (waiting(i) || i.state === "stale")
+    actions += `<details class="menu"><summary class="icon-btn" title="Later: off the list for a while" aria-label="Later">${icon("clock")}</summary><div class="menu-list"><button data-act="later" data-until="1h">${icon("clock")}For an hour</button><button data-act="later" data-until="tomorrow">${icon("clock")}Until tomorrow</button></div></details><button class="icon-btn" data-act="done" title="Done: off the list until it does something new" aria-label="Done">${icon("check")}</button>`;
+  if (i.herdr) actions += `<button class="icon-btn" data-act="focus" title="Go to its pane, on this computer" aria-label="Go to its pane">${icon("goto")}</button>`;
+  $("head").innerHTML = head(nameOf(i), `<span class="pill ${i.state}">${STATE[i.state]}</span>${held}`, actions);
+  $("tab-meta").innerHTML = [
+    `<span class="agent ${i.agent}">${agentName(i.agent)}</span>`,
+    i.model ? `<span title="Model">${esc(i.model)}</span>` : "",
+    `<span title="${esc(new Date(i.since).toLocaleString())}">${ago(i.since)}</span>`,
+    i.herdr ? `<span title="Its herdr pane">${esc(i.herdr.pane)} · ${esc(i.herdr.status)}</span>` : "",
+  ].join("");
 }
 
 function paintTabs(e) {
@@ -1000,7 +1058,7 @@ function layout() {
   if (wide.matches && tab === "details") tab = "chat";
   for (const t of TABS) $("pane-" + t).hidden = sp || tab !== t;
   $("pane-special").hidden = !sp;
-  $("head").hidden = $("tabs").hidden = sp;
+  $("head").hidden = $("tabs-row").hidden = sp;
   const slot = wide.matches ? $("side") : $("pane-details");
   if ($("info").parentNode !== slot) slot.appendChild($("info"));
 }
@@ -1145,13 +1203,13 @@ function paintDock(e) {
   if (i && i.herdr && i.state !== "needs-answer") {
     if (i.state === "your-turn" && !i.hold) {
       // Claude Code switches model and effort with its own commands.
-      const switches = i.agent === "claude" ? `<select class="chip-sel" data-slash="model" aria-label="Switch its model"><option value="">Model…</option>${["fable", "opus", "sonnet", "haiku"].map((m) => `<option>${m}</option>`).join("")}</select><select class="chip-sel" data-slash="effort" aria-label="Switch its effort"><option value="">Effort…</option>${EFFORTS.map((m) => `<option>${m}</option>`).join("")}</select>` : "";
-      html += `<div class="quick">${quick.map((q) => `<button class="chip-btn" data-quick="${esc(q)}">${esc(q)}</button>`).join("")}<button class="chip-btn ghost" data-act="edit-quick" title="Change these replies">✎</button>${switches}</div>`;
+      const switches = i.agent === "claude" ? `<span class="lbl">Model</span>${["fable", "opus", "sonnet", "haiku"].map((m) => `<button class="chip-btn" data-slash="/model ${m}">${m}</button>`).join("")}<span class="lbl">Effort</span>${EFFORTS.map((m) => `<button class="chip-btn" data-slash="/effort ${m}">${m}</button>`).join("")}` : "";
+      html += `<div class="quick-row"><div class="quick">${quick.map((q) => `<button class="chip-btn" data-quick="${esc(q)}">${esc(q)}</button>`).join("")}</div><button class="icon-btn" data-act="tune" aria-expanded="${tuneOpen}" aria-pressed="${tuneOpen}" aria-controls="tune-panel" title="More: ${i.agent === "claude" ? "its model and effort, " : ""}these replies" aria-label="More">${icon("tune")}</button></div><div class="tune-panel" id="tune-panel"${tuneOpen ? "" : " hidden"}>${switches}<button class="chip-btn ghost" data-act="edit-quick">Change these replies</button></div>`;
     }
-    const stop = i.state === "working" ? `<button class="btn" data-key-press="esc" title="Interrupt it (Esc)">Stop</button>` : "";
+    const stop = i.state === "working" ? `<button class="icon-btn" data-key-press="esc" title="Stop it (Esc)" aria-label="Stop">${icon("stop")}</button>` : "";
     const files = attached.get(i.key) || [];
     if (files.length) html += `<div class="attached">${files.map((f, n) => `<span class="att" title="${esc(f.path)}"><span class="nm">${esc(f.name)}</span><button data-unattach="${n}" aria-label="Do not send ${esc(f.name)}">×</button></span>`).join("")}</div>`;
-    html += `<div class="composer"><button class="btn icon" data-act="attach" title="Send files: photos, logs, documents" aria-label="Send files">+</button><input type="file" id="attach" multiple hidden><textarea id="prompt" rows="1" aria-label="Message to the session" placeholder="${i.state === "working" ? "Queue a message" : "Reply"}" title="Ctrl+Enter sends">${esc(drafts.get(i.key) || "")}</textarea>${stop}<button class="btn primary" data-act="prompt">Send</button></div>`;
+    html += `<div class="composer"><button class="icon-btn" data-act="attach" title="Send files: photos, logs, documents" aria-label="Send files">${icon("plus", 20)}</button><input type="file" id="attach" multiple hidden><textarea id="prompt" rows="1" aria-label="Message to the session" placeholder="${i.state === "working" ? "Queue a message" : "Reply"}" title="Ctrl+Enter sends">${esc(drafts.get(i.key) || "")}</textarea>${stop}<button class="send-btn" data-act="prompt" title="Send (Ctrl+Enter)" aria-label="Send">${icon("send")}</button></div>`;
     if (i.state === "working") html += `<p class="sub hint">It is working; your message waits in its queue.</p>`;
   } else if (i && !i.herdr && (waiting(i) || i.state === "needs-answer")) {
     html += `<p class="note">To answer from this page, run it in a <a href="https://herdr.dev" target="_blank" rel="noopener">herdr</a> pane. Or go back to it: <code class="cmd">${esc(i.resume)}</code> <button class="btn small" data-copy="${esc(i.resume)}">Copy</button></p>`;
@@ -1270,6 +1328,8 @@ function paintInfo(e) {
     html += sec("Context", `${limit && c.tokens !== undefined ? `<div class="bar ${level}"><span style="width:${Math.min(100, Math.round((c.tokens / limit) * 100))}%"></span></div>` : ""}<div class="sub">${esc(what)}${c.compactions ? ` · compacted ${c.compactions}×` : ""}${level === "full" ? " · nearly full: it will compact soon" : ""}</div>`);
   }
   const facts = [
+    ["Agent", `${agentName(i.agent)}${i.model ? ` · ${esc(i.model)}` : ""}`],
+    ["Since", `${esc(ago(i.since))}${i.herdr ? ` · herdr ${esc(i.herdr.pane)}` : ""}`],
     ["Folder", `<span class="path">${esc(i.cwd || "")}</span> <button class="linkish" data-open="">Browse</button>`],
     i.jobId ? ["Background", esc(i.jobId)] : null,
     i.memory ? ["Memory", `${Math.round(i.memory / 1e6)} MB`] : null,
@@ -1815,7 +1875,7 @@ function cardAsk(i) {
 
 function cardQuick(i) {
   if (!i.herdr || i.state === "needs-answer") return "";
-  if (i.state === "working") return `<button class="chip-btn" data-card-key="esc" title="Interrupt it (Esc)">Stop</button>`;
+  if (i.state === "working") return `<button class="chip-btn" data-card-key="esc" title="Stop it (Esc)">${icon("stop", 12)} Stop</button>`;
   return i.state === "your-turn" && !i.hold ? quick.map((q) => `<button class="chip-btn" data-card-quick="${esc(q)}">${esc(q)}</button>`).join("") : "";
 }
 
@@ -1840,7 +1900,7 @@ function cards(container, items, size = "tile") {
     if (!el) {
       el = doc.createElement("article");
       el.dataset.card = i.key;
-      el.innerHTML = `<header class="card-head"></header><div class="card-meta"></div><div class="card-body"></div><div class="card-ask"></div><div class="card-reply"><div class="card-quick"></div><form class="card-form" data-card-form><input class="card-input" aria-label="Reply to ${esc(nameOf(i))}" placeholder="${i.state === "working" ? "Queue a message" : "Reply"}" autocomplete="off"><button class="btn small primary">Send</button></form><p class="card-note"></p></div>`;
+      el.innerHTML = `<header class="card-head"></header><div class="card-meta"></div><div class="card-body"></div><div class="card-ask"></div><div class="card-reply"><div class="card-quick"></div><form class="card-form" data-card-form><input class="card-input" aria-label="Reply to ${esc(nameOf(i))}" placeholder="${i.state === "working" ? "Queue a message" : "Reply"}" autocomplete="off"><button class="send-btn small" aria-label="Send">${icon("send", 16)}</button></form><p class="card-note"></p></div>`;
     }
     if (el !== before) container.insertBefore(el, before);
     before = el.nextElementSibling;
@@ -1888,8 +1948,11 @@ function paintLayout() {
 }
 
 function paintLayoutSwitch() {
-  const buttons = [...layouts.values()].map((l) => `<button data-layout="${esc(l.id)}" aria-pressed="${l.id === currentLayout}" title="${esc(l.title || l.label)}">${esc(l.label)}</button>`);
-  if ("documentPictureInPicture" in window) buttons.push(`<button data-popout aria-pressed="${!!pip}" title="A small window that stays on top: what waits on you">Pop out</button>`);
+  const buttons = [...layouts.values()].map((l) => {
+    const pic = l.icon || (ICONS[l.id] ? icon(l.id) : "");
+    return `<button data-layout="${esc(l.id)}" aria-pressed="${l.id === currentLayout}" title="${esc(l.label)}: ${esc(l.title || "")}" aria-label="${esc(l.label)}">${pic || esc(l.label)}</button>`;
+  });
+  if ("documentPictureInPicture" in window) buttons.push(`<span class="seg-sep"></span><button data-popout aria-pressed="${!!pip}" title="Pop out: a small window on top of the others, with what waits on you" aria-label="Pop out">${icon("popout")}</button>`);
   const html = buttons.join("");
   if (shown.layouts !== html) $("layouts").innerHTML = shown.layouts = html;
   document.body.dataset.layout = currentLayout;
@@ -2167,6 +2230,11 @@ async function act(name, el) {
       await startNew();
     } else if (name === "quick") {
       await sendPrompt(i, el.dataset.quick);
+    } else if (name === "tune") {
+      tuneOpen = !tuneOpen;
+      el.setAttribute("aria-expanded", String(tuneOpen));
+      el.setAttribute("aria-pressed", String(tuneOpen));
+      $("tune-panel").hidden = !tuneOpen;
     } else if (name === "edit-quick") {
       const v = window.prompt("One-tap replies, separated by |", quick.join(" | "));
       if (v === null) return;
@@ -2309,6 +2377,12 @@ $("app").addEventListener("click", (ev) => {
   if (k) return void pressKey(k.dataset.keyPress);
   const q = t.closest("[data-quick]");
   if (q) return void act("quick", q);
+  const sl = t.closest("[data-slash]");
+  if (sl) {
+    const i = entry(selected) && entry(selected).item;
+    if (i) void sendPrompt(i, sl.dataset.slash).catch((e) => setNote("answer-note", e.message, false));
+    return;
+  }
   const ci = t.closest("[data-ci]");
   if (ci) return void readCi(ci.dataset.ci);
   const cis = t.closest("[data-ci-send]");
@@ -2396,11 +2470,6 @@ $("app").addEventListener("keydown", (ev) => {
 $("app").addEventListener("change", (ev) => {
   const i = entry(selected) && entry(selected).item;
   if (ev.target.id === "attach" && i && ev.target.files.length) void uploadFiles(i, [...ev.target.files]);
-  if (ev.target.dataset && ev.target.dataset.slash && i && ev.target.value) {
-    const cmd = `/${ev.target.dataset.slash} ${ev.target.value}`;
-    ev.target.value = "";
-    void sendPrompt(i, cmd).catch((e) => setNote("answer-note", e.message, false));
-  }
   if (ev.target.id === "ns-attach" && ev.target.files.length) void uploadNew([...ev.target.files]);
   if (ev.target.name === "ns-agent") modelChoices();
 });

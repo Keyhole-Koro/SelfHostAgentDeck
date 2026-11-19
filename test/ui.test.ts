@@ -264,7 +264,8 @@ esac
     await until(() => herdrCalls().includes("agent prompt w1:p2 Open the PR"));
     await page.click('#dock [data-quick="Continue"]');
     await until(() => herdrCalls().includes("agent prompt w1:p2 Continue"));
-    await page.selectOption('#dock [data-slash="model"]', "opus");
+    await page.click('#dock [data-act="tune"]');
+    await page.click('#dock [data-slash="/model opus"]');
     await until(() => herdrCalls().includes("agent prompt w1:p2 /model opus"));
     await page.setInputFiles("#attach", { name: "shot.png", mimeType: "image/png", buffer: Buffer.from([0x89, 0x50, 0x4e, 0x47]) });
     await page.waitForSelector("#dock .att");
@@ -287,6 +288,7 @@ esac
   });
 
   it("puts a session off with Later", async () => {
+    await page.click("#head details.menu > summary"); // Later is a menu: for an hour, until tomorrow
     await page.click('[data-act="later"][data-until="1h"]');
     await page.waitForSelector('.fold[data-fold="held"]');
     assert.match(await page.locator('.fold[data-fold="held"]').innerText(), /1 on hold/);
@@ -307,10 +309,12 @@ esac
   });
 
   it("lists what can be cleaned up", async () => {
+    await page.click("#more > summary");
     await page.click("#cleanup");
     await page.waitForSelector('[data-goto="claude:old"]');
     assert.match(await page.locator("#special").innerText(), /Idle sessions · 1[\s\S]*Old idea/i);
     await shot("4-cleanup");
+    await page.click("#more > summary");
     await page.click("#cleanup");
     await page.waitForSelector(".session[aria-current=\"true\"]");
   });

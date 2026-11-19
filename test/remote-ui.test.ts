@@ -72,6 +72,7 @@ describe("remote page", { skip: !chromium && "no browser" }, () => {
   });
 
   it("lists this device under Remote, and signs out and back in with the passkey", async () => {
+    await page.click("#more > summary");
     await page.click("#remote");
     await page.waitForSelector("text=(this one)");
     assert.match(await page.locator("#special").innerText(), /Test phone \(this one\)/);
@@ -96,6 +97,7 @@ describe("remote page", { skip: !chromium && "no browser" }, () => {
   it("shows a QR code to add a phone, on this computer's page only", async () => {
     const local = await browser.newPage();
     await local.goto(localUrl);
+    await local.click("#more > summary");
     await local.click("#remote");
     await local.click('[data-remote="pair"]');
     await local.waitForSelector(".pair svg");
