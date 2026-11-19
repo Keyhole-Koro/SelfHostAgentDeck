@@ -14,6 +14,7 @@ import { focus, herdrAgents, matchPanes, prompt, screen, sendKeys, type HerdrAge
 import { applyHolds, hold, parseUntil, release, stateDir } from "./holds.ts";
 import { readInbox, transcriptOf, type Inbox, type InboxItem } from "./inbox.ts";
 import { prStatuses } from "./prs.ts";
+import { parsePrompt } from "./prompts.ts";
 import {
   audit,
   authenticationOptions,
@@ -326,7 +327,10 @@ export async function serve(opts: ServeOptions): Promise<Served> {
     }
     if (url.pathname.startsWith("/api/herdr/")) {
       const action = url.pathname.slice("/api/herdr/".length);
-      if (req.method === "GET" && action === "screen") return json(res, 200, { text: await screen(paneOf(url.searchParams.get("key"))) });
+      if (req.method === "GET" && action === "screen") {
+        const text = await screen(paneOf(url.searchParams.get("key")));
+        return json(res, 200, { text, prompt: parsePrompt(text) ?? null });
+      }
       if (req.method !== "POST") return json(res, 404, { error: "Not found" });
       const b = await body(req);
       const pane = paneOf(b["key"]);
