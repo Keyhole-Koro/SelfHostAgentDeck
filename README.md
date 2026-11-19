@@ -21,6 +21,9 @@ notification when one needs you, start new ones, and stage exactly one session's
   the session's screen. A working session gets **Stop**, and one waiting for your turn gets
   one-tap replies. You can send files with a prompt, or switch a session's model and effort.
   All of this goes through [herdr](https://herdr.dev).
+- **Many at once.** Besides one session at a time, the Deck layout shows sessions as columns side
+  by side, and Grid shows them as tiles; you can answer from either. Pop out keeps a small window
+  on top of your other windows. You can add layouts of your own, as plugins.
 - **From your phone, signed in with a passkey**, at a host name of yours through a Cloudflare
   Tunnel. To act, the device must have checked its passkey in the last five minutes.
 - **Notifications** on your phone or desktop, even with the page closed: when a session asks you
@@ -70,6 +73,50 @@ agent-deck view --since today    # with the changes since a time or a commit
 | Desktop (1280 px and wider) | Three columns: the sessions by project, the conversation, and its details |
 | Tablet | The sessions and the conversation side by side; the details in their own tab |
 | Phone | The list, then one session full screen with Back; the reply box stays at the bottom |
+
+### Layouts
+
+| Layout | Shows |
+|---|---|
+| **Focus** | One session at a time, with its tabs |
+| **Deck** | The sessions side by side, as columns you can answer from. On a phone, swipe between them |
+| **Grid** | Every session as a tile |
+
+In Deck and Grid, each card shows the end of the session's conversation, the choices of a question
+one tap away, and a reply box (with one-tap replies, or Stop for a working session). The card's
+title opens the session in Focus. **Pop out** (Chrome and Edge) opens a small window that stays on
+top of your other windows, with the sessions that wait on you.
+
+Layouts are plugins. Your own go in `~/.config/agent-deck/layouts/*.js`: the page includes them,
+and they register like the built-in ones.
+
+```js
+// ~/.config/agent-deck/layouts/waiting.js: only what waits on you
+AgentDeck.registerLayout({
+  id: "waiting",
+  label: "Waiting",
+  title: "Only the sessions that wait on you",
+  paint(root, deck) {
+    if (!root.firstChild) root.innerHTML = '<div class="grid-tiles"></div>';
+    const waiting = deck.sessions().filter((s) => s.state === "needs-answer" || s.state === "your-turn");
+    deck.cards(root.firstChild, waiting, "tile");
+  },
+});
+```
+
+`paint(root, deck)` runs on every refresh. It has these parts to work with:
+
+- `deck.sessions({ idle, held })` gives the running sessions, most urgent first, each with its
+  `key`, `state`, `title`, `name`, `reason`, `questions`, `tasks`, `prs` and so on.
+- `deck.cards(container, sessions, "column" | "tile" | "mini")` keeps one card per session in
+  `container`.
+- `deck.send(key, text)`, `deck.press(key, "1")` and `deck.open(key)` act on a session.
+- `deck.markdown(text)` and `deck.esc(text)` render text.
+
+A layout runs as part of the page: it can do whatever the page can, and it runs on your other
+devices too. Only put your own code there. This example is in `examples/layouts/`.
+
+### Sessions and their tabs
 
 Projects with a session waiting on you come first. Within a project, sessions are sorted by what
 they need from you (see [Waiting on you](#waiting-on-you)). Next come the sessions that ended but
