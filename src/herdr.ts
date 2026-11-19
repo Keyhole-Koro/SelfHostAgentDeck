@@ -55,7 +55,7 @@ export function herdr(socket: string, args: string[], timeout = 8000): Promise<R
       } catch {
         return reject(err ?? new Error("herdr printed no JSON"));
       }
-      if (out?.error) return reject(new Error(out.error.message || out.error.code || "herdr error"));
+      if (out?.error) return reject(Object.assign(new Error(out.error.message || out.error.code || "herdr error"), { code: out.error.code }));
       if (err) return reject(err);
       resolve(out?.result ?? {});
     });
@@ -108,10 +108,14 @@ function toAgent(a: AgentInfo, socket: string): HerdrAgent {
   return agent;
 }
 
+/** Sockets of herdr sessions the sessions' processes named; kept for the calls that name none. */
+let extra: string[] = [];
+
 /** The agents herdr knows, as last seen; refreshed in the background when older than a few seconds. */
-export function herdrAgents(extraSockets: string[] = []): HerdrAgent[] {
+export function herdrAgents(extraSockets?: string[]): HerdrAgent[] {
+  if (extraSockets) extra = extraSockets;
   if ((!cache || Date.now() - cache.at > TTL) && !refreshing) {
-    refreshing = refreshHerdr([...herdrSockets(), ...extraSockets])
+    refreshing = refreshHerdr([...herdrSockets(), ...extra])
       .then(() => undefined)
       .finally(() => (refreshing = undefined));
   }
