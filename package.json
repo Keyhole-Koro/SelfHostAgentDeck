@@ -47,11 +47,11 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Keyhole-Koro/AgentDeck.git"
+    "url": "git+https://github.com/Keyhole-Koro/SelfHostAgentDeck.git"
   },
-  "homepage": "https://github.com/Keyhole-Koro/AgentDeck#readme",
+  "homepage": "https://github.com/Keyhole-Koro/SelfHostAgentDeck#readme",
   "bugs": {
-    "url": "https://github.com/Keyhole-Koro/AgentDeck/issues"
+    "url": "https://github.com/Keyhole-Koro/SelfHostAgentDeck/issues"
   },
   "author": "Keyhole-Koro",
   "files": [
