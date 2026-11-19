@@ -311,7 +311,8 @@ esac
     await page.fill("#prompt", "Look at this");
     await page.click('[data-act="prompt"]');
     await until(() => herdrCalls().some((l) => l.includes("Look at this")) && herdrCalls().some((l) => /\.agent-deck\/uploads\/\d{8}-\d{6}-shot\.png/.test(l)) && herdrCalls().some((l) => /\.agent-deck\/uploads\/\d{8}-\d{6}-pasted-\d{6}\.png/.test(l)));
-    assert.equal(await page.locator("#dock .att").count(), 0, "sent with the prompt");
+    // herdr is called before the server answers the page: wait for the page to have the answer.
+    await until(async () => (await page.locator("#dock .att").count()) === 0); // sent with the prompt
     await page.click('[data-tab="changes"]');
     await page.waitForSelector(".comment-btn");
     await page.locator(".comment-btn").first().click();
@@ -343,7 +344,7 @@ esac
     await page.click('[data-act="ns-start"]');
     await until(() => herdrCalls().some((l) => /^agent start \S+ --kind claude --pane w9:p1 --timeout 60000 -- --session-id [0-9a-f-]{36} --model opus --effort high$/.test(l)));
     await until(() => herdrCalls().includes("agent prompt w9:p1 Add CSV export"));
-    assert.match(await page.locator("#ns-note").innerText(), /Started/);
+    await until(async () => /Started/.test(await page.locator("#ns-note").innerText())); // once the page has the answer
     await page.click("#new");
   });
 
@@ -504,7 +505,7 @@ esac
     assert.equal(await card.locator(".card-input").inputValue(), "hello from the deck\n", "Enter alone is a new line");
     await card.locator(".card-input").press("Control+Enter");
     await until(() => herdrCalls().includes("agent prompt w1:p3 hello from the deck"));
-    assert.equal(await card.locator(".card-input").inputValue(), "", "sent, and cleared");
+    await until(async () => (await card.locator(".card-input").inputValue()) === ""); // sent, and cleared once the page has the answer
     await shot("6-deck");
   });
 
