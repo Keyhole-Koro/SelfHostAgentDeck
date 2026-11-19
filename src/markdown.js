@@ -33,9 +33,12 @@ function markdown(src) {
     return p ? fileLink(p, label || esc(p)) : label;
   }
 
-  /** Links, bare URLs and paths, and emphasis; `code` was taken out before (see inline). */
+  /**
+   * Links, bare URLs and paths, and emphasis; `code` was taken out before (see inline). A link's
+   * address never takes in where code was: the code goes back in as tags, so in text only.
+   */
   function spans(s) {
-    const re = /(!?)\[([^\]\n]*)\]\(\s*(<[^>\n]*>|[^\s()]*(?:\([^\s()]*\)[^\s()]*)*)(?:\s+"[^"\n]*")?\s*\)|<(https?:\/\/[^\s<>]+)>|(https?:\/\/[\w\-.~:/?#[\]@!$&*+,;=%()]*[\w\-~/#@$&*+=%])|(?<=^|[\s(（「『:：])(\/[\w.@+~%-]+(?:\/[\w.@+~%-]+)+)|\*\*(?=\S)([\s\S]*?\S)\*\*|~~(?=\S)([\s\S]*?\S)~~|(?<![\w*])\*(?=[^\s*])([^*\n]*?[^\s*])\*(?![\w*])|(?<![\w_])_(?=[^\s_])([^_\n]*?[^\s_])_(?![\w_])/g;
+    const re = /(!?)\[([^\]\n]*)\]\(\s*(<[^>\n\u0000]*>|[^\s()\u0000]*(?:\([^\s()\u0000]*\)[^\s()\u0000]*)*)(?:\s+"[^"\n]*")?\s*\)|<(https?:\/\/[^\s<>\u0000]+)>|(https?:\/\/[\w\-.~:/?#[\]@!$&*+,;=%()]*[\w\-~/#@$&*+=%])|(?<=^|[\s(（「『:：])(\/[\w.@+~%-]+(?:\/[\w.@+~%-]+)+)|\*\*(?=\S)([\s\S]*?\S)\*\*|~~(?=\S)([\s\S]*?\S)~~|(?<![\w*])\*(?=[^\s*])([^*\n]*?[^\s*])\*(?![\w*])|(?<![\w_])_(?=[^\s_])([^_\n]*?[^\s_])_(?![\w_])/g;
     let out = "";
     let last = 0;
     let m;
@@ -54,10 +57,14 @@ function markdown(src) {
     return out + esc(s.slice(last));
   }
 
-  /** Inline Markdown. Code spans are set aside first, so emphasis around them still pairs up. */
+  /**
+   * Inline Markdown. Code spans are set aside first, so emphasis around them still pairs up; a
+   * \u0000 in the text itself is dropped (as the page would drop it), so only the marks they
+   * leave (\u0000n\u0000) are put back.
+   */
   function inline(s) {
     const codes = [];
-    const held = String(s).replace(/(`+)([\s\S]*?[^`])\1(?!`)/g, (_, ticks, body) => {
+    const held = String(s).replace(/\u0000/g, "").replace(/(`+)([\s\S]*?[^`])\1(?!`)/g, (_, ticks, body) => {
       const code = body.replace(/^ (.*[^ ].*) $/, "$1");
       const p = filePath(code);
       codes.push(`<code>${p ? fileLink(p, esc(code)) : esc(code)}</code>`);
