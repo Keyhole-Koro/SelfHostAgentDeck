@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
-import { chmodSync, mkdtempSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { chmodSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import { ciFailure, cleanLog } from "../src/ci.ts";
+import { tempDir } from "./tmp.ts";
 
 describe("why CI failed", () => {
   it("cleans a failing log: no timestamps, no colours, a header where the step changes", () => {
@@ -12,7 +12,7 @@ describe("why CI failed", () => {
   });
 
   it("reads the failing checks and the end of each failing run's log, with gh", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "adv-ci-"));
+    const dir = tempDir("adv-ci-");
     const gh = join(dir, "gh");
     const checks = [
       { name: "test", bucket: "fail", link: "https://github.com/o/r/actions/runs/42/job/1" },

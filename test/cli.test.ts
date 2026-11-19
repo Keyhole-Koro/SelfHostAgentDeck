@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { beforeEach, describe, it } from "node:test";
+import { tempDir } from "./tmp.ts";
 
 // Run inside herdr or not, the processes these tests start must not inherit a real herdr pane.
 delete process.env["HERDR_PANE_ID"];
@@ -17,7 +17,7 @@ let home: string;
 let env: NodeJS.ProcessEnv;
 
 beforeEach(() => {
-  home = mkdtempSync(join(tmpdir(), "adv-cli-"));
+  home = tempDir("adv-cli-");
   env = { ...process.env, HOME: home, CLAUDE_CONFIG_DIR: "", CODEX_HOME: "", XDG_STATE_HOME: "", AGENT_DECK_STATE_DIR: "", NO_COLOR: "1" };
 });
 

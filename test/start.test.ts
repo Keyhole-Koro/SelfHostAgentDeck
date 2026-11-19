@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { beforeEach, describe, it } from "node:test";
+import { tempDir } from "./tmp.ts";
 
 /** A herdr that logs each call (one per line, its arguments joined by |) and answers like herdr. */
-const dir = mkdtempSync(join(tmpdir(), "adv-start-"));
+const dir = tempDir("adv-start-");
 const log = join(dir, "calls.log");
 mkdirSync(join(dir, "config", "herdr"), { recursive: true });
 writeFileSync(join(dir, "config", "herdr", "herdr.sock"), "");

@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it } from "node:test";
+import { tempDir } from "./tmp.ts";
 
 // The home folder decides which roots are refused: keep it a made-up one.
-const home = realpathSync(mkdtempSync(join(tmpdir(), "adv-files-home-")));
+const home = realpathSync(tempDir("adv-files-home-"));
 process.env.HOME = home;
 const { FileError, filesRoot, image, look, secret } = await import("../src/files.ts");
 

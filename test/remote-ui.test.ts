@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
+import { tempDir } from "./tmp.ts";
 
 // Run inside herdr or not, the processes these tests start must not inherit a real herdr pane.
 delete process.env["HERDR_PANE_ID"];
@@ -28,7 +28,7 @@ try {
 }
 
 describe("remote page", { skip: !chromium && "no browser" }, () => {
-  const home = mkdtempSync(join(tmpdir(), "adv-rui-"));
+  const home = tempDir("adv-rui-");
   const env = { ...process.env, HOME: home, CLAUDE_CONFIG_DIR: "", CODEX_HOME: "", XDG_STATE_HOME: "", AGENT_DECK_STATE_DIR: join(home, "state") };
   const port = 49_000 + Math.floor(Math.random() * 900);
   const origin = `http://localhost:${port}`;

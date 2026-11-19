@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
 import { createHmac } from "node:crypto";
-import { mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { request } from "node:http";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, beforeEach, describe, it } from "node:test";
+import { tempDir } from "./tmp.ts";
 
 // Run inside herdr or not, the processes these tests start must not inherit a real herdr pane.
 delete process.env["HERDR_PANE_ID"];
@@ -144,7 +144,7 @@ async function signIn(passkey: Awaited<ReturnType<typeof softPasskey>>): Promise
 }
 
 before(async () => {
-  home = mkdtempSync(join(tmpdir(), "adv-remote-"));
+  home = tempDir("adv-remote-");
   state = join(home, "state");
   env = { ...process.env, HOME: home, CLAUDE_CONFIG_DIR: "", CODEX_HOME: "", XDG_STATE_HOME: "", AGENT_DECK_STATE_DIR: state, AGENT_DECK_PUSH_INSECURE: "1" };
   const sessions = join(home, ".claude", "sessions");

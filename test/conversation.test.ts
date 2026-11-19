@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
-import { appendFileSync, mkdtempSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { appendFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import { chatImage, readChat, type ChatMessage } from "../src/conversation.ts";
+import { tempDir } from "./tmp.ts";
 
-const dir = mkdtempSync(join(tmpdir(), "adv-chat-"));
+const dir = tempDir("adv-chat-");
 let n = 0;
 const file = (lines: object[], tail = "") => {
   const f = join(dir, `t${n++}.jsonl`);

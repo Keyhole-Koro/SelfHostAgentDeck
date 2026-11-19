@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { request } from "node:http";
-import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { inTerminal } from "./terminal.ts";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { summarize } from "../src/prs.ts";
 import { browser, decrypt, pushService } from "./push-browser.ts";
+import { tempDir } from "./tmp.ts";
 
 // Run inside herdr or not, the processes these tests start must not inherit a real herdr pane.
 delete process.env["HERDR_PANE_ID"];
@@ -27,8 +27,8 @@ function git(cwd: string, ...args: string[]): string {
 }
 
 beforeEach(() => {
-  home = mkdtempSync(join(tmpdir(), "adv-srv-home-"));
-  repo = realpathSync(mkdtempSync(join(tmpdir(), "adv-srv-repo-")));
+  home = tempDir("adv-srv-home-");
+  repo = realpathSync(tempDir("adv-srv-repo-"));
   env = { ...process.env, HOME: home, CLAUDE_CONFIG_DIR: "", CODEX_HOME: "", XDG_STATE_HOME: "", AGENT_DECK_STATE_DIR: "" };
   git(repo, "init", "-q", "-b", "main");
   writeFileSync(join(repo, "shared.ts"), ["const a = 1;", "", "", "", "", "", "", "", "", "const z = 26;", ""].join("\n"));
@@ -300,7 +300,7 @@ describe("api: later and done", () => {
 
 describe("api: cleanup", () => {
   it("lists idle sessions and the worktrees that can go, with the commands", async () => {
-    const wt = (name: string) => join(realpathSync(mkdtempSync(join(tmpdir(), "adv-wt-"))), name);
+    const wt = (name: string) => join(realpathSync(tempDir("adv-wt-")), name);
     const merged = wt("merged");
     const dirty = wt("dirty");
     const busy = wt("busy");

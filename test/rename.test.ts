@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it } from "node:test";
+import { tempDir } from "./tmp.ts";
 
 /** Agent Deck was agent-diff: what was set up under the old name keeps working, or moves over. */
 
@@ -11,7 +11,7 @@ const CLI = join(import.meta.dirname, "..", "src", "cli.ts");
 
 describe("from agent-diff to Agent Deck", () => {
   it("moves the state (holds, the page's token, devices) to its new folder, once", () => {
-    const home = mkdtempSync(join(tmpdir(), "adv-rename-"));
+    const home = tempDir("adv-rename-");
     const state = join(home, "state");
     mkdirSync(join(state, "agent-diff"), { recursive: true });
     writeFileSync(join(state, "agent-diff", "token"), "0123456789abcdef0123456789abcdef\n");
@@ -35,7 +35,7 @@ describe("from agent-diff to Agent Deck", () => {
   });
 
   it("replaces the hooks, status line and skill installed under the old name", async () => {
-    const claude = mkdtempSync(join(tmpdir(), "adv-rename-claude-"));
+    const claude = tempDir("adv-rename-claude-");
     process.env["CLAUDE_CONFIG_DIR"] = claude;
     writeFileSync(
       join(claude, "settings.json"),

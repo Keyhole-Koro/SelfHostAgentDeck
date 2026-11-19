@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { inTerminal } from "./terminal.ts";
 import { after, before, describe, it } from "node:test";
+import { tempDir } from "./tmp.ts";
 
 // Run inside herdr or not, the processes these tests start must not inherit a real herdr pane.
 delete process.env["HERDR_PANE_ID"];
@@ -30,8 +30,8 @@ try {
 }
 
 describe("page", { skip: (!chromium && "no browser") || (process.platform !== "linux" && "reads /proc") }, () => {
-  const home = mkdtempSync(join(tmpdir(), "adv-ui-home-"));
-  const repo = realpathSync(mkdtempSync(join(tmpdir(), "adv-ui-repo-")));
+  const home = tempDir("adv-ui-home-");
+  const repo = realpathSync(tempDir("adv-ui-repo-"));
   const herdrLog = join(home, "herdr.log");
   const socket = join(home, "herdr.sock");
   const kids: ChildProcess[] = [];

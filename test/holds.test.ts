@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, statSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { statSync } from "node:fs";
 import { join } from "node:path";
 import { beforeEach, describe, it } from "node:test";
 import { applyHolds, hold, parseUntil, readHolds, release } from "../src/holds.ts";
 import type { Inbox, InboxItem } from "../src/inbox.ts";
 import { newlyWaiting } from "../src/notify.ts";
 import { statusLine } from "../src/statusline.ts";
+import { tempDir } from "./tmp.ts";
 
 const NOW = Date.parse("2026-11-19T10:00:00");
 
@@ -16,7 +16,7 @@ function item(key: string, state: InboxItem["state"], since = NOW - 1000, extra:
 const inbox = (...items: InboxItem[]): Inbox => ({ generatedAt: NOW, staleAfter: 864e5, items });
 
 beforeEach(() => {
-  process.env["AGENT_DECK_STATE_DIR"] = mkdtempSync(join(tmpdir(), "adv-state-"));
+  process.env["AGENT_DECK_STATE_DIR"] = tempDir("adv-state-");
 });
 
 describe("holds", () => {
@@ -60,7 +60,7 @@ describe("holds", () => {
   });
 
   it("keeps holds readable by you only, in a state folder it makes so", () => {
-    const dir = join(mkdtempSync(join(tmpdir(), "adv-state-")), "agent-deck");
+    const dir = join(tempDir("adv-state-"), "agent-deck");
     process.env["AGENT_DECK_STATE_DIR"] = dir;
     hold(item("claude:a", "your-turn"), "done", undefined, NOW);
     assert.equal(statSync(dir).mode & 0o777, 0o700);

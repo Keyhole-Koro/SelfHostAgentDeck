@@ -1,15 +1,13 @@
 import assert from "node:assert/strict";
-import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { it } from "node:test";
+import { tempDir } from "./tmp.ts";
 
 /**
  * The attribution worker holds every transcript it has parsed, so a page left running all day
  * lets it go when nobody looks. The worker reads transcripts under HOME: keep it in an empty one.
  */
 
-process.env.HOME = mkdtempSync(join(tmpdir(), "adv-worker-"));
+process.env.HOME = tempDir("adv-worker-");
 process.env.CLAUDE_CONFIG_DIR = "";
 process.env.CODEX_HOME = "";
 const { attributionWorker } = await import("../src/server.ts");

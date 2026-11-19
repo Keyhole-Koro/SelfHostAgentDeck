@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { spawn, type ChildProcess } from "node:child_process";
-import { appendFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { appendFileSync, chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { after, beforeEach, describe, it } from "node:test";
 import { codexCommand, endsWithQuestion, readInbox, terminalApp, transcriptOf, type InboxItem } from "../src/inbox.ts";
+import { tempDir } from "./tmp.ts";
 
 // Run inside herdr or not, the processes these tests start must not inherit a real herdr pane.
 delete process.env["HERDR_PANE_ID"];
@@ -16,7 +16,7 @@ let codex: string; // stands for ~/.codex
 const holders: ChildProcess[] = [];
 
 beforeEach(() => {
-  const root = mkdtempSync(join(tmpdir(), "adv-inbox-"));
+  const root = tempDir("adv-inbox-");
   home = join(root, "claude");
   codex = join(root, "codex");
 });
@@ -385,7 +385,7 @@ describe("inbox: Codex", () => {
 describe("inbox: where a session runs outside herdr", () => {
   it("names the terminal app, from the session's parent processes", { skip: process.platform !== "linux" }, async () => {
     // A stand-in for Ptyxis's process, with a session (sleep) under it.
-    const dir = mkdtempSync(join(tmpdir(), "adv-app-"));
+    const dir = tempDir("adv-app-");
     const app = join(dir, "ptyxis-agent");
     writeFileSync(app, '#!/bin/sh\nsleep 60 &\necho $! > "$1"\nwait\n');
     chmodSync(app, 0o755);
