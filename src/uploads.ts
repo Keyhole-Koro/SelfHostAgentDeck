@@ -1,5 +1,6 @@
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, writeFileSync } from "node:fs";
 import { basename, join, relative } from "node:path";
+import { FileError } from "./files.ts";
 
 /**
  * Files sent from the page (a photo from the phone, a log, a spec) for a session to read. They go
@@ -27,11 +28,30 @@ export function safeName(name: string): string {
 
 const stamp = (d: Date) => `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}${String(d.getDate()).padStart(2, "0")}-${String(d.getHours()).padStart(2, "0")}${String(d.getMinutes()).padStart(2, "0")}${String(d.getSeconds()).padStart(2, "0")}`;
 
+/**
+ * A folder of ours in the repository, made if it is missing, and never one that is a link: a
+ * repository from someone else could point `.agent-deck` anywhere, and files sent would land there.
+ */
+function ownFolder(root: string, path: string): void {
+  try {
+    mkdirSync(path);
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
+  }
+  if (!lstatSync(path).isDirectory()) throw new FileError(`${relative(root, path)} is a link or a file, not a folder: nothing is sent there.`, 409);
+}
+
 export function saveUpload(root: string, name: string, data: Buffer, now = new Date()): Upload {
   const deck = join(root, ".agent-deck");
   const dir = join(deck, "uploads");
-  mkdirSync(dir, { recursive: true });
-  if (!existsSync(join(deck, ".gitignore"))) writeFileSync(join(deck, ".gitignore"), "# Files sent to agent sessions from Agent Deck; never committed.\n*\n");
+  ownFolder(root, deck);
+  ownFolder(root, dir);
+  try {
+    // Only if there is none: one already there, even a link, is left as it is (and not followed).
+    writeFileSync(join(deck, ".gitignore"), "# Files sent to agent sessions from Agent Deck; never committed.\n*\n", { flag: "wx" });
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
+  }
   let path = join(dir, `${stamp(now)}-${safeName(name)}`);
   for (let n = 2; existsSync(path); n++) path = join(dir, `${stamp(now)}-${n}-${safeName(name)}`);
   writeFileSync(path, data, { flag: "wx" });
