@@ -36,6 +36,25 @@ notification when one needs you, start new ones, and stage exactly one session's
 - **Who changed what.** Each uncommitted hunk is attributed to the session that made it, from
   transcripts and optional hooks. You can stage exactly one session's changes.
 
+<table>
+<tr>
+<td width="50%"><img src="docs/screenshots/answer.png" alt="A session asking to run a command: its three choices as buttons"></td>
+<td width="50%"><img src="docs/screenshots/deck.png" alt="Deck: the sessions side by side, each with its conversation, choices and a reply box"></td>
+</tr>
+<tr>
+<td><b>One tap to answer</b>: the choices a session asks you for, read off its screen</td>
+<td><b>Deck</b>: every session at once, as columns you can answer from</td>
+</tr>
+</table>
+
+<p align="center">
+<img src="docs/screenshots/phone.png" width="31%" alt="On a phone: a session's conversation, and the reply box at the bottom">
+<img src="docs/screenshots/phone-answer.png" width="31%" alt="On a phone: the choices of a permission prompt, one tap each">
+<img src="docs/screenshots/phone-deck.png" width="31%" alt="On a phone: Deck, a session per screen, swiped through">
+</p>
+
+All the screenshots are of made-up data: `npm run screenshots` builds it and takes them.
+
 ## Install
 
 You need Node 22.18 or later, and git. Optional:
@@ -74,6 +93,10 @@ agent-deck view --since today    # with the changes since a time or a commit
 | Tablet | The sessions and the conversation side by side; the details in their own tab |
 | Phone | The list, then one session full screen with Back; the reply box stays at the bottom |
 
+The page follows your system's light or dark setting.
+
+![The same page in the dark](docs/screenshots/viewer-dark.png)
+
 ### Layouts
 
 | Layout | Shows |
@@ -81,6 +104,8 @@ agent-deck view --since today    # with the changes since a time or a commit
 | **Focus** | One session at a time, with its tabs |
 | **Deck** | The sessions side by side, as columns you can answer from. On a phone, swipe between them |
 | **Grid** | Every session as a tile |
+
+![Grid: every session as a tile, the one asking something marked red](docs/screenshots/grid.png)
 
 In Deck and Grid, each card shows the end of the session's conversation, the choices of a question
 one tap away, and a reply box (with one-tap replies, or Stop for a working session). The card's
@@ -132,6 +157,8 @@ left changes in this repository. Idle ones are folded away. Picking a session sh
 Files stay inside the session's repository (or its own folder, outside one). `.git` is never
 shown, and neither are files that commonly hold secrets (`.env`, keys, credentials, `tfstate`).
 A session that runs in your home folder shows no files.
+
+![Files: a session's repository, its Markdown rendered](docs/screenshots/files.png)
 
 The buttons above the changes choose the range:
 
@@ -225,6 +252,8 @@ in that folder's workspace, or in a new git worktree on a branch you name. You c
 and the effort level, write the first message, and attach any files. Claude Code gets its
 session id from Agent Deck, so the page opens the new session as soon as it shows up.
 
+![New session: a folder, Claude Code or Codex, the model and effort, and the first message](docs/screenshots/new.png)
+
 ### Notifications
 
 **Notify** subscribes this browser to notifications that the page's server pushes: a session
@@ -244,6 +273,8 @@ long as the server runs. A tap opens the session.
 open), it looks every 15 seconds and logs what changed: a session started, asked something,
 finished its turn, or ended; it opened a pull request; its CI turned red or green; it published
 a page.
+
+![Activity: today's events, newest first](docs/screenshots/activity.png)
 
 ### In Claude Code's status line
 
@@ -289,9 +320,8 @@ that reloads itself every minute.
 The page can also be served at a host name of yours, through a
 [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/),
 to the devices you added. From the phone you can do everything the page does: read, answer,
-start sessions, look at files, get notifications.
-
-![On a phone: one session, its conversation, and the reply box at the bottom](docs/screenshots/phone.png)
+start sessions, look at files, get notifications. Devices sign in with a **passkey** (see
+[Passkeys](#passkeys) below); there is no password anywhere.
 
 ```bash
 # Once: a tunnel from a host name in your Cloudflare DNS to this computer
@@ -314,6 +344,44 @@ agent-deck inbox --view --remote https://agents.example.com
 # Add a phone: scan the QR code, then make a passkey on it
 agent-deck remote pair
 ```
+
+### Passkeys
+
+A passkey is a key pair that your phone makes for this one host name. The private half never
+leaves the device: it stays in the phone's keychain (iCloud Keychain or Google Password Manager
+may sync it to your other devices), and Face ID, Touch ID or the phone's PIN unlocks it. The
+server keeps only the public half. So there is nothing to guess, reuse or leak from the server,
+and a passkey made for your host name does not work on any other site, which also makes it
+phishing-proof.
+
+**1. Make a pairing link, on your computer.** **Remote → Add a phone** on the local page (or
+`agent-deck remote pair` in a terminal) shows a QR code. It works once, for 10 minutes, and only
+this computer can make one: a device that is already signed in cannot add others.
+
+![Remote on the computer: the QR code for a new device, the devices added, and what they did](docs/screenshots/remote.png)
+
+<table>
+<tr>
+<td width="33%"><img src="docs/screenshots/phone-pair.png" alt="On the phone: Add this device, with a name for it and Create a passkey"></td>
+<td width="33%"><img src="docs/screenshots/phone-login.png" alt="On the phone: Sign in with a passkey"></td>
+<td width="33%"><img src="docs/screenshots/phone-confirm.png" alt="On the phone: Is it you? before sending, Use the passkey"></td>
+</tr>
+<tr>
+<td><b>2. Add the phone.</b> Scan the code, name the device, and tap <b>Create a passkey</b>. You are signed in.</td>
+<td><b>3. Sign in later</b> with the passkey: one tap and Face ID. A session lasts 30 days.</td>
+<td><b>4. Before acting</b>, the page checks the passkey again if the last check is older than five minutes.</td>
+</tr>
+</table>
+
+**On iPhone and iPad, add it to the home screen.** In Safari, tap Share, then Add to Home Screen.
+The app opens full screen, and it is the only way iOS delivers [notifications](#notifications)
+to a web page. The app keeps its own sign-in, apart from Safari's, so sign in once more inside
+it: the passkey is already there.
+
+**A lost or replaced phone.** On your computer, open **Remote** and **Remove** the device (or run
+`agent-deck remote revoke <id>`). Its passkey stops working here, and its sessions and
+notifications end at once. Then add the new phone the same way. When a device is added, the
+others get a notification, so a device added without you noticing does not stay unnoticed.
 
 How it is kept to you:
 
