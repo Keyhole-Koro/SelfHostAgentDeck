@@ -145,7 +145,17 @@ esac
 `,
     );
     const gh = join(home, "gh");
-    writeFileSync(gh, `#!/bin/sh\nprintf '%s\\n' '${JSON.stringify({ number: 7, title: "Due dates", state: "OPEN", isDraft: false, url: "https://github.com/o/r/pull/7", statusCheckRollup: [{ status: "COMPLETED", conclusion: "FAILURE" }] })}'\n`);
+    const checks = [{ name: "test", bucket: "fail", link: "https://github.com/o/r/actions/runs/42/job/1" }];
+    writeFileSync(
+      gh,
+      `#!/bin/sh
+case "$1 $2" in
+  "pr checks") printf '%s\\n' '${JSON.stringify(checks)}'; exit 1 ;;
+  "run view") printf 'test\\tRun tests\\t2026-11-19T00:00:00.0Z Expected 1, got 2\\n' ;;
+  *) printf '%s\\n' '${JSON.stringify({ number: 7, title: "Due dates", state: "OPEN", isDraft: false, url: "https://github.com/o/r/pull/7", statusCheckRollup: [{ status: "COMPLETED", conclusion: "FAILURE" }] })}' ;;
+esac
+`,
+    );
     chmodSync(herdr, 0o755);
     chmodSync(gh, 0o755);
 
@@ -213,6 +223,11 @@ esac
     assert.match(info, /Shared files[\s\S]*shared\.ts with Fix z/i);
     assert.ok(await page.locator("aside#side #info").isVisible(), "beside the conversation on a wide screen");
     await until(async () => /CI: 1 failed/.test(await page.locator("#info").innerText()));
+    await page.click('#info [data-ci="https://github.com/o/r/pull/7"]');
+    await page.waitForSelector("#info .ci-log pre");
+    assert.match(await page.locator("#info .ci-log pre").innerText(), /test › Run tests\nExpected 1, got 2/);
+    await page.click('#info [data-ci-send="https://github.com/o/r/pull/7"]');
+    await until(() => herdrCalls().some((l) => l.includes("agent prompt w1:p2 CI failed on https://github.com/o/r/pull/7 (test)")));
     await shot("2-your-turn");
     assert.ok(await page.locator('.session[data-key="claude:builder"] .chip.conflict').count());
   });
