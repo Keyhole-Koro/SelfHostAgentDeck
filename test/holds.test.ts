@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeEach, describe, it } from "node:test";
@@ -57,6 +57,14 @@ describe("holds", () => {
     assert.deepEqual(Object.keys(readHolds()), ["claude:b"]);
     assert.equal(release("claude:b"), true);
     assert.equal(release("claude:b"), false);
+  });
+
+  it("keeps holds readable by you only, in a state folder it makes so", () => {
+    const dir = join(mkdtempSync(join(tmpdir(), "adv-state-")), "agent-deck");
+    process.env["AGENT_DECK_STATE_DIR"] = dir;
+    hold(item("claude:a", "your-turn"), "done", undefined, NOW);
+    assert.equal(statSync(dir).mode & 0o777, 0o700);
+    assert.equal(statSync(join(dir, "holds.json")).mode & 0o777, 0o600);
   });
 
   it("reads times: relative, tomorrow, a clock time, a date", () => {

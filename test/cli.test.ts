@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeEach, describe, it } from "node:test";
@@ -134,6 +134,23 @@ describe("inbox --publish", () => {
     assert.match(html, /http-equiv="refresh"/);
     assert.ok(!html.includes("<script>"), "content is escaped");
     assert.match(html, /&lt;script&gt;alert\(1\)&lt;\/script&gt;/);
+  });
+
+  it("keeps the snapshot readable by you only, one written before too", () => {
+    running("p1", { status: "idle" });
+    const fake = join(home, "artifact");
+    writeFileSync(fake, `#!/bin/sh\nprintf '%s\\n' '{"url":"https://artifacts.example/a/abc"}'\n`);
+    chmodSync(fake, 0o755);
+    const publish = () => execFileSync(process.execPath, [CLI, "inbox", "--publish"], { cwd: home, env: { ...env, AGENT_DECK_ARTIFACT: fake, AGENT_DECK_GH: "/nonexistent/gh" }, encoding: "utf8" });
+    publish();
+    const state = join(home, ".local", "state", "agent-deck");
+    const file = join(state, "snapshot", "agent-inbox.html");
+    assert.equal(statSync(state).mode & 0o777, 0o700);
+    assert.equal(statSync(join(state, "snapshot")).mode & 0o777, 0o700);
+    assert.equal(statSync(file).mode & 0o777, 0o600);
+    chmodSync(file, 0o644); // as an older agent-deck left it
+    publish();
+    assert.equal(statSync(file).mode & 0o777, 0o600);
   });
 
   it("says why when publishing fails", () => {
