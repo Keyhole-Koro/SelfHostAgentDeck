@@ -4,7 +4,7 @@ import { appendFileSync, existsSync, mkdirSync, mkdtempSync, writeFileSync } fro
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, beforeEach, describe, it } from "node:test";
-import { codexCommand, endsWithQuestion, readInbox, type InboxItem } from "../src/inbox.ts";
+import { codexCommand, endsWithQuestion, readInbox, transcriptOf, type InboxItem } from "../src/inbox.ts";
 
 const HOUR = 36e5;
 let home: string; // stands for ~/.claude
@@ -142,6 +142,27 @@ describe("inbox: what a Claude transcript adds", () => {
       { url: "https://github.com/o/r/pull/7", number: 7, repo: "o/r" },
       { url: "https://github.com/o/r/pull/8", number: 8, repo: "o/r" },
     ]);
+  });
+
+  it("keeps the pages the session published, with the MCP tool or the CLI, and where its transcript is", () => {
+    const file = transcript("s1", [
+      tool("p1", "mcp__artifact__publish", { file_path: "/tmp/x/report.html", title: "Outage report" }),
+      { type: "user", message: { content: [{ type: "tool_result", tool_use_id: "p1", content: "Published: https://pages.example/a/abc (version 1, private)" }] } },
+      tool("p2", "Bash", { command: "artifact publish notes.html --title 'Notes' --json" }),
+      { type: "user", message: { content: [{ type: "tool_result", tool_use_id: "p2", content: JSON.stringify({ url: "https://pages.example/a/def", created: true }) }] } },
+      tool("p3", "mcp__artifact__publish", { file_path: "/tmp/x/failed.html" }),
+      { type: "user", message: { content: [{ type: "tool_result", tool_use_id: "p3", content: "Error: not allowed" }] } },
+      tool("b1", "Bash", { command: "npm test" }),
+      { type: "user", message: { content: [{ type: "tool_result", tool_use_id: "b1", content: "see https://example.com/docs" }] } },
+    ]);
+    running("s1");
+    const item = inbox().items[0]!;
+    assert.deepEqual(item.pages?.map((p) => [p.url, p.title]), [
+      ["https://pages.example/a/abc", "Outage report"],
+      ["https://pages.example/a/def", "Notes"],
+    ]);
+    assert.equal(transcriptOf(item), file);
+    assert.equal(Object.keys(item).includes("transcript"), false, "kept off what the page is sent");
   });
 
   it("measures the context, and remembers where it was last compacted", () => {

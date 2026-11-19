@@ -1,6 +1,6 @@
 import { closeSync, existsSync, openSync, readdirSync, readFileSync, readSync, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { isAbsolute, join, resolve } from "node:path";
+import { basename, isAbsolute, join, resolve } from "node:path";
 import { sessionKey, type Agent } from "./types.ts";
 
 /**
@@ -53,6 +53,13 @@ export interface InboxPr {
   repo: string;
 }
 
+/** A page the session published (with the `artifact` tool or CLI, or as a claude.ai artifact). */
+export interface InboxPage {
+  url: string;
+  title?: string;
+  at: number;
+}
+
 export interface InboxContext {
   /** Tokens the last request sent (the context in use); unknown right after a compaction. */
   tokens?: number;
@@ -94,6 +101,8 @@ export interface InboxItem {
   /** Background commands and monitors still running. */
   background?: InboxBackground[];
   prs?: InboxPr[];
+  /** Pages it published, the latest last. */
+  pages?: InboxPage[];
   context?: InboxContext;
   /** Codex: a command the turn is still waiting on. */
   inFlight?: { command: string; since: number };
@@ -148,6 +157,8 @@ const MAX_MESSAGE = 4000;
 const MAX_PROMPT = 1000;
 /** Pull requests listed per session (the most recent). */
 const MAX_PRS = 6;
+/** Published pages listed per session (the most recent). */
+const MAX_PAGES = 8;
 /** How far back the first look at a transcript goes. */
 const FIRST_READ = 2 * 1024 * 1024;
 /** A Codex command running this long without output may be waiting for approval. */
@@ -371,6 +382,7 @@ interface Block {
   name?: string;
   input?: Record<string, unknown>;
   tool_use_id?: string;
+  content?: unknown;
 }
 
 interface ClaudeLine {
@@ -413,11 +425,14 @@ interface ClaudeAcc {
   lastCompactTokens?: number;
   /** Files the session wrote with its edit tools (absolute path → when). */
   edited: Map<string, number>;
+  /** Publish calls waiting for the URL their result tells, and the pages published. */
+  publishing: Map<string, { title?: string }>;
+  pages: Map<string, InboxPage>;
 }
 
 const claudeCursors = new Map<string, Cursor<ClaudeAcc>>();
 
-const newClaudeAcc = (): ClaudeAcc => ({ pending: new Map(), prs: new Map(), tasks: new Map(), creates: new Map(), starting: new Map(), background: new Map(), compactions: 0, edited: new Map() });
+const newClaudeAcc = (): ClaudeAcc => ({ pending: new Map(), prs: new Map(), tasks: new Map(), creates: new Map(), starting: new Map(), background: new Map(), compactions: 0, edited: new Map(), publishing: new Map(), pages: new Map() });
 
 /**
  * The files a session wrote, for spotting files two sessions share (conflicts.ts). Kept off the
@@ -429,6 +444,42 @@ export function editedFiles(item: InboxItem): Map<string, number> {
 const EDITED = Symbol("edited");
 function setEdited(item: InboxItem, files: Map<string, number>): void {
   Object.defineProperty(item, EDITED, { value: files, enumerable: false });
+}
+
+/** The session's transcript (Claude Code) or rollout (Codex), for reading its conversation. */
+export function transcriptOf(item: InboxItem): string | undefined {
+  return (item as InboxItem & { [TRANSCRIPT]?: string })[TRANSCRIPT];
+}
+const TRANSCRIPT = Symbol("transcript");
+function setTranscript(item: InboxItem, file: string): void {
+  Object.defineProperty(item, TRANSCRIPT, { value: file, enumerable: false });
+}
+
+/** A call that publishes a page: the `artifact` MCP tool or CLI, or Claude's own Artifact tool. */
+function publishTitle(name: string, input: Record<string, unknown>, command = ""): { title?: string } | undefined {
+  const s = (k: string) => (typeof input[k] === "string" ? (input[k] as string) : "");
+  const tool = (/artifact/i.test(name) && /publish/i.test(name)) || (name === "Artifact" && (!s("action") || s("action") === "publish"));
+  const cli = /\bartifact\s+publish\b/.test(command);
+  if (!tool && !cli) return undefined;
+  const title = s("title") || /--title[ =](?:"([^"]+)"|'([^']+)'|(\S+))/.exec(command)?.slice(1).find(Boolean) || (s("file_path") ? basename(s("file_path")) : "");
+  return title ? { title } : {};
+}
+
+/** The page's URL in a publish result: the CLI's JSON, or "Published: https://…". */
+function publishedUrl(text: string): string | undefined {
+  try {
+    const j = JSON.parse(text) as { url?: unknown };
+    if (typeof j.url === "string") return j.url;
+  } catch {
+    // not JSON
+  }
+  return /https?:\/\/[^\s"'<>)\]]+/.exec(text)?.[0];
+}
+
+function resultText(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) return (content as { text?: unknown }[]).map((c) => (typeof c?.text === "string" ? c.text : "")).join("\n");
+  return "";
 }
 
 /** Lines worth parsing: most of a transcript is tool output, file snapshots and request records. */
@@ -494,6 +545,12 @@ function feedClaude(acc: ClaudeAcc, raw: string): void {
           if (b?.type === "text" && b.text?.includes("<task-notification>")) finishTasks(acc, b.text);
           if (b?.type !== "tool_result" || !b.tool_use_id) continue;
           acc.pending.delete(b.tool_use_id);
+          const publish = acc.publishing.get(b.tool_use_id);
+          if (publish) {
+            acc.publishing.delete(b.tool_use_id);
+            const url = publishedUrl(resultText(b.content));
+            if (url) acc.pages.set(url, { url, ...publish, at });
+          }
           const result = line.toolUseResult ?? {};
           const create = acc.creates.get(b.tool_use_id);
           if (create) {
@@ -521,6 +578,8 @@ function feedClaude(acc: ClaudeAcc, raw: string): void {
         acc.pending.set(b.id, b);
         const input = b.input ?? {};
         const str = (v: unknown) => (typeof v === "string" ? v : "");
+        const publish = publishTitle(b.name ?? "", input, b.name === "Bash" ? str(input["command"]) : "");
+        if (publish) acc.publishing.set(b.id, publish);
         switch (b.name) {
           case "Edit":
           case "MultiEdit":
@@ -588,6 +647,7 @@ function fromTranscript(item: InboxItem, acc: ClaudeAcc): void {
   if (acc.tasks.size) item.tasks = [...acc.tasks.values()];
   if (acc.background.size) item.background = [...acc.background.values()];
   if (acc.prs.size) item.prs = [...acc.prs.values()].slice(-MAX_PRS);
+  if (acc.pages.size) item.pages = [...acc.pages.values()].slice(-MAX_PAGES);
   if (acc.tokens !== undefined || acc.compactions) {
     item.context = { compactions: acc.compactions };
     if (acc.tokens !== undefined) item.context.tokens = acc.tokens;
@@ -672,6 +732,7 @@ function claudeItems(home: string, now: number, staleAfter: number, light: boole
       item.resume = `claude attach ${job.short}`;
       if (job.state === "blocked" && job.needs) item.reason = item.reason ? `${item.reason} · ${job.needs}` : job.needs;
     }
+    if (transcript) setTranscript(item, transcript);
     const memory = memoryOf(pid);
     if (memory) item.memory = memory;
     const terminal = terminalOf(pid);
@@ -713,6 +774,7 @@ function claudeItems(home: string, now: number, staleAfter: number, light: boole
     if (reason) item.reason = reason;
     const transcript = light ? undefined : claudeTranscript(home, sessionId);
     if (transcript) {
+      setTranscript(item, transcript);
       const acc = follow(claudeCursors, transcript, newClaudeAcc, feedClaude);
       if (acc) fromTranscript(item, acc);
     }
@@ -863,6 +925,8 @@ interface CodexAcc {
   window?: number;
   limits?: CodexLimits;
   edited: Map<string, number>;
+  publishing: Map<string, { title?: string }>;
+  pages: Map<string, InboxPage>;
 }
 
 const codexCursors = new Map<string, Cursor<CodexAcc>>();
@@ -888,8 +952,20 @@ function feedCodex(acc: CodexAcc, raw: string): void {
     const callId = typeof p["call_id"] === "string" ? p["call_id"] : undefined;
     if (!callId) return;
     if (p["type"] === "custom_tool_call" || p["type"] === "function_call") {
-      acc.calls.set(callId, { command: codexCommand(String(p["name"] ?? "tool"), p["input"] ?? p["arguments"]), since: Number.isNaN(at) ? Date.now() : at });
-    } else if (p["type"] === "custom_tool_call_output" || p["type"] === "function_call_output") acc.calls.delete(callId);
+      const input = p["input"] ?? p["arguments"];
+      acc.calls.set(callId, { command: codexCommand(String(p["name"] ?? "tool"), input), since: Number.isNaN(at) ? Date.now() : at });
+      const publish = publishTitle(String(p["name"] ?? ""), {}, typeof input === "string" ? input : "");
+      if (publish) acc.publishing.set(callId, publish);
+    } else if (p["type"] === "custom_tool_call_output" || p["type"] === "function_call_output") {
+      acc.calls.delete(callId);
+      const publish = acc.publishing.get(callId);
+      if (publish) {
+        acc.publishing.delete(callId);
+        const out = p["output"];
+        const url = publishedUrl(typeof out === "string" ? out : resultText(out));
+        if (url) acc.pages.set(url, { url, ...publish, at: Number.isNaN(at) ? Date.now() : at });
+      }
+    }
     return;
   }
   if (e.type !== "event_msg") return;
@@ -969,7 +1045,7 @@ function codexItems(home: string, now: number): { items: InboxItem[]; limits?: C
     } catch {
       continue;
     }
-    const acc = follow(codexCursors, file, (): CodexAcc => ({ state: "your-turn", since: mtime, calls: new Map(), edited: new Map() }), feedCodex);
+    const acc = follow(codexCursors, file, (): CodexAcc => ({ state: "your-turn", since: mtime, calls: new Map(), edited: new Map(), publishing: new Map(), pages: new Map() }), feedCodex);
     if (!acc) continue;
     const entry: InboxItem = {
       key: sessionKey("codex", id),
@@ -983,6 +1059,8 @@ function codexItems(home: string, now: number): { items: InboxItem[]; limits?: C
     };
     if (names.has(id)) entry.title = names.get(id)!;
     setEdited(entry, acc.edited);
+    setTranscript(entry, file);
+    if (acc.pages.size) entry.pages = [...acc.pages.values()].slice(-MAX_PAGES);
     if (acc.reason) entry.reason = acc.reason;
     if (acc.lastMessage) entry.lastMessage = clip(acc.lastMessage);
     if (acc.lastPrompt) entry.lastPrompt = acc.lastPrompt;
