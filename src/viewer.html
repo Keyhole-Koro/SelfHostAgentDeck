@@ -365,6 +365,52 @@ dialog::backdrop { background: rgba(0, 0, 0, .4); }
 dialog h2 { margin: 0 0 6px; font-size: 17px; }
 dialog p { margin: 0 0 14px; color: var(--muted); font-size: 14px; }
 
+/* ---------------------------------------------------------------- layouts: the switch, cards, Deck, Grid, Pop out */
+.layouts { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.layouts button { border: 0; background: transparent; padding: 3px 10px; font-size: 13px; cursor: pointer; color: var(--muted); }
+.layouts button + button { border-left: 1px solid var(--line); }
+.layouts button:hover { color: var(--text); background: var(--hover); }
+.layouts button[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent); }
+.layout-root { display: none; flex: 1; min-height: 0; overflow: auto; }
+body:not([data-layout="focus"]) .app { display: none; }
+body:not([data-layout="focus"]) .layout-root { display: block; }
+.card { display: flex; flex-direction: column; min-width: 0; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: var(--bg); }
+.card.s-needs-answer { border-color: var(--urgent); }
+.card-head { display: flex; gap: 8px; align-items: center; padding: 10px 12px 2px; min-width: 0; }
+.card-title { flex: 1; min-width: 0; border: 0; background: none; padding: 0; font: inherit; font-weight: 650; text-align: left; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
+.card-title:hover { color: var(--accent); }
+.card-head .age { color: var(--faint); font-size: 12px; white-space: nowrap; }
+.card-meta { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: center; padding: 0 12px 8px; font-size: 12px; color: var(--muted); }
+.card-body { flex: 1; min-height: 0; overflow-y: auto; padding: 4px 12px; font-size: 14px; border-top: 1px solid var(--line); overscroll-behavior: contain; }
+.card-body .msg { margin: 8px 0; }
+.card-body .bubble { max-width: 92%; padding: 6px 11px; border-radius: 14px 14px 5px 14px; }
+.card-body .md { line-height: 1.6; }
+.card-body .md pre.code { font-size: 11.5px; }
+.card-body .event, .card-body .when { margin: 8px 0; }
+.card-steps { font-size: 12px; color: var(--faint); margin: 4px 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.card-ask { padding: 8px 12px; border-top: 1px solid var(--line); }
+.card-ask:empty { display: none; }
+.card-ask .choices { margin-top: 6px; }
+.card-ask .choice { padding: 7px 10px; font-size: 13px; }
+.card-reply { padding: 8px 10px 10px; border-top: 1px solid var(--line); }
+.card-quick { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; margin-bottom: 6px; }
+.card-quick:empty { display: none; }
+.card-form { display: flex; gap: 6px; }
+.card-input { flex: 1; min-width: 0; font: inherit; font-size: 14px; color: var(--text); background: var(--field); border: 1px solid var(--line); border-radius: 10px; padding: 6px 10px; }
+.card-input:focus { outline: none; border-color: var(--accent); }
+.card-note { margin: 4px 2px 0; font-size: 12px; color: var(--muted); }
+.card-note:empty { display: none; }
+.deck-cols { display: flex; gap: 12px; padding: 12px; height: 100%; overflow-x: auto; scroll-snap-type: x proximity; }
+.deck-cols > .card { flex: none; width: 380px; height: 100%; scroll-snap-align: start; }
+.grid-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 12px; padding: 12px; align-content: start; }
+.grid-tiles > .card { height: 360px; }
+.layout-empty { color: var(--muted); padding: 48px 16px; text-align: center; }
+body.pip { height: auto; min-height: 100vh; overflow: auto; display: block; }
+.pip-head { display: flex; gap: 10px; align-items: baseline; padding: 10px 12px 0; font-size: 14px; }
+.mini-list { display: grid; gap: 8px; padding: 8px; }
+.card.mini .card-body { flex: none; max-height: 4.6em; overflow: hidden; font-size: 13px; }
+.card.mini .card-head { padding-top: 8px; }
+
 /* ---------------------------------------------------------------- touch */
 @media (pointer: coarse) {
   .btn, .tbtn { min-height: 36px; }
@@ -383,7 +429,12 @@ dialog p { margin: 0 0 14px; color: var(--muted); font-size: 14px; }
   .app { grid-template-columns: minmax(0, 1fr); }
   nav#nav { border-right: 0; }
   body[data-view="list"] main#main { display: none; }
-  body[data-view="session"] nav#nav, body[data-view="session"] header#top { display: none; }
+  body[data-view="session"] nav#nav, body[data-layout="focus"][data-view="session"] header#top { display: none; }
+  .deck-cols { scroll-snap-type: x mandatory; padding: 8px; gap: 8px; }
+  .deck-cols > .card { width: calc(100vw - 16px); }
+  .grid-tiles { grid-template-columns: minmax(0, 1fr); padding: 8px; gap: 8px; }
+  .grid-tiles > .card { height: auto; max-height: 75vh; }
+  .layouts button { padding: 3px 8px; }
   body.special main#main { grid-column: auto; }
   .back { display: inline-flex; }
   .shead { padding: 10px 16px 0; }
@@ -402,12 +453,13 @@ dialog p { margin: 0 0 14px; color: var(--muted); font-size: 14px; }
 }
 </style>
 </head>
-<body data-view="list">
+<body data-view="list" data-layout="focus">
 <header id="top">
   <h1>Agent Deck</h1>
   <div class="summary" id="summary"></div>
   <div class="tools">
     <span class="limits optional" id="limits"></span>
+    <div class="layouts" id="layouts" role="group" aria-label="Layout"></div>
     <button class="tbtn" id="new" title="Start Claude Code or Codex in a new herdr tab">New</button>
     <button class="tbtn" id="activity" title="What happened in every session">Activity</button>
     <button class="tbtn" id="notify" aria-pressed="false" title="A notification when a session waits on you, also with the page closed">Notify</button>
@@ -432,6 +484,7 @@ dialog p { margin: 0 0 14px; color: var(--muted); font-size: 14px; }
   </main>
   <aside id="side" aria-label="About this session"><div id="info"></div></aside>
 </div>
+<div class="layout-root" id="layout-root"></div>
 <dialog id="confirm" aria-labelledby="confirm-title">
   <h2 id="confirm-title">Is it you?</h2>
   <p>From another device, sending to a session needs this device's passkey every few minutes.</p>
@@ -636,6 +689,7 @@ async function loadInbox() {
   paint();
   if (selected === "activity") void paintActivity();
   openStarted();
+  if (currentLayout !== "focus" || pip) void refreshCards();
   // What the selected session wrote since: cheap, only the new end of its transcript.
   if (tab === "chat" && chat.key === selected && chat.state === "ready") void loadChat("newer");
 }
@@ -1637,6 +1691,341 @@ async function paintRemote() {
   $("special").innerHTML = html + "</div>";
 }
 
+// ------------------------------------------------------------ layouts
+
+/**
+ * Layouts: how the sessions fill the page. Focus is one session at a time; Deck and Grid show many
+ * at once, as cards. Your own register the same way, from JS files in
+ * ~/.config/agent-deck/layouts/ (inlined into this page):
+ *
+ *   AgentDeck.registerLayout({ id, label, title, paint(root, deck) })
+ *
+ * paint() runs on every refresh (every 5 seconds, and on changes). deck.sessions() gives the
+ * sessions, most urgent first; deck.cards(container, sessions, "column" | "tile" | "mini") keeps
+ * their cards in a container, with the conversation, the choices of a question and a reply box.
+ */
+const layouts = new Map();
+let currentLayout = "focus";
+
+function registerLayout(l) {
+  if (!l || typeof l.id !== "string" || !l.label) return console.error("A layout needs an id and a label.", l);
+  layouts.set(l.id, l);
+  paintLayoutSwitch();
+  if (l.id === stored("layout", "focus") && currentLayout !== l.id) setLayout(l.id);
+}
+
+/** The sessions, most urgent first, as the list orders them; idle and put-off ones only if asked. */
+function sessionsInOrder(opts = {}) {
+  const rank = (i) => (i.hold ? 5 : ORDER[i.state]);
+  return (inbox ? inbox.items : [])
+    .filter((i) => (opts.idle || i.state !== "stale") && (opts.held || !i.hold))
+    .sort((a, b) => rank(a) - rank(b) || b.since - a.since);
+}
+
+const cardState = new Map(); // session → { messages, end, ready, busy, screen, screenSince }
+const cardHtml = new WeakMap(); // a card's part → what it shows, to repaint only on change
+
+/** A session's conversation for its card: the latest page, then what was written since. */
+async function loadCard(i) {
+  let st = cardState.get(i.key);
+  if (!st) cardState.set(i.key, (st = { messages: [], end: 0, ready: false, busy: false, screen: null, screenSince: null }));
+  if (st.busy) return;
+  st.busy = true;
+  const q = `key=${encodeURIComponent(i.key)}`;
+  try {
+    if (!st.ready) {
+      const page = await api(`/api/chat?${q}&limit=20`);
+      Object.assign(st, { messages: page.messages, end: page.end, ready: true });
+    } else {
+      const page = await api(`/api/chat?${q}&after=${st.end}`);
+      if (page.reset) st.ready = false;
+      else if (page.messages.length || page.end !== st.end) Object.assign(st, { end: page.end, messages: st.messages.concat(page.messages).slice(-300) });
+    }
+    if (i.state === "needs-answer" && i.herdr && st.screenSince !== i.since) {
+      st.screen = await api(`/api/herdr/screen?${q}`);
+      st.screenSince = i.since;
+    }
+  } catch {
+    // next time
+  } finally {
+    st.busy = false;
+  }
+}
+
+function cardHead(i) {
+  return `<span class="dot ${i.state}"></span><button class="card-title" data-card-open title="Open ${esc(nameOf(i))}">${esc(nameOf(i))}</button><span class="age">${esc(age(i.since))}</span>`;
+}
+
+function cardMeta(i) {
+  const done = i.tasks ? i.tasks.filter((t) => t.status === "completed").length : 0;
+  const pr = prState(i);
+  return [
+    `<span class="pill ${i.state}">${i.hold ? "On hold" : STATE[i.state]}</span>`,
+    `<span class="agent ${i.agent}">${agentName(i.agent)}</span>`,
+    `<span>${esc(base(i.project || i.cwd || ""))}</span>`,
+    i.tasks && i.tasks.length ? `<span class="chip" title="Tasks done">${done}/${i.tasks.length}</span>` : "",
+    pr ? `<span class="chip ${pr}" title="Pull request CI: ${pr}">PR</span>` : "",
+    i.asks ? '<span class="chip ask" title="Its last reply ends with a question">?</span>' : "",
+  ].join("");
+}
+
+/** The end of the conversation: the last few things said, each run of steps as one line. */
+function cardBody(i, size) {
+  if (size === "mini") return `<div class="sub">${esc(i.state === "needs-answer" ? "" : snippet({ key: i.key, item: i }))}</div>`;
+  const st = cardState.get(i.key);
+  if (!st || !st.ready) return `<div class="sub">Reading…</div>`;
+  const keep = size === "column" ? 14 : 3;
+  const out = [];
+  let said = 0;
+  let steps = [];
+  const flush = () => {
+    if (!steps.length) return;
+    const names = [...new Set(steps.map((x) => x.tool))].slice(0, 3).join(" · ");
+    out.unshift(`<div class="card-steps">${plural(steps.length, "step")} · ${esc(names)}${steps.some((x) => x.error) ? ' · <span class="ci-failing">failed</span>' : ""}</div>`);
+    steps = [];
+  };
+  for (let n = st.messages.length - 1; n >= 0 && said < keep; n--) {
+    const m = st.messages[n];
+    if (m.role === "tool") {
+      steps.unshift(m);
+      continue;
+    }
+    flush();
+    out.unshift(msgHtml(m));
+    if (m.role === "user" || m.role === "assistant") said++;
+  }
+  flush();
+  return out.join("") || `<div class="sub">Nothing said yet.</div>`;
+}
+
+function cardAsk(i) {
+  if (i.state !== "needs-answer") return "";
+  const st = cardState.get(i.key);
+  const p = i.herdr && st && st.screen && st.screen.prompt;
+  let html = `<div class="reason">${esc(i.reason || "input needed")}</div>`;
+  if (i.plan) html += `<details class="plan-doc"><summary>The plan</summary><div class="md">${markdown(i.plan)}</div></details>`;
+  const questions = (i.questions || []).map((q) => q.question);
+  if (!questions.length && p && p.question) questions.push(p.question);
+  html += questions.map((q) => `<div class="q">${esc(q)}</div>`).join("");
+  if (p) html += `<div class="choices">${p.choices.map((c) => `<button class="choice${c.selected ? " selected" : ""}" data-card-key="${c.key}"><span class="k">${c.key}</span><span>${esc(c.label)}</span></button>`).join("")}</div>`;
+  else if (i.herdr) html += `<div class="sub">Reading its screen…</div>`;
+  else html += `<div class="sub">Answer it where it runs: <code class="cmd">${esc(i.resume)}</code></div>`;
+  return html;
+}
+
+function cardQuick(i) {
+  if (!i.herdr || i.state === "needs-answer") return "";
+  if (i.state === "working") return `<button class="chip-btn" data-card-key="esc" title="Interrupt it (Esc)">Stop</button>`;
+  return i.state === "your-turn" && !i.hold ? quick.map((q) => `<button class="chip-btn" data-card-quick="${esc(q)}">${esc(q)}</button>`).join("") : "";
+}
+
+/** Shows `html` in a card's part, only when it changed (a reply being typed is never touched). */
+function setPart(part, html, follow) {
+  if (cardHtml.get(part) === html) return;
+  const atEnd = part.scrollTop + part.clientHeight >= part.scrollHeight - 30;
+  part.innerHTML = html;
+  cardHtml.set(part, html);
+  if (follow && (atEnd || !part.dataset.seen)) part.scrollTop = part.scrollHeight;
+  part.dataset.seen = "1";
+}
+
+/** Keeps one card per session in `container`, in order, each showing what it should now. */
+function cards(container, items, size = "tile") {
+  const doc = container.ownerDocument;
+  const want = new Set(items.map((i) => i.key));
+  for (const el of [...container.children]) if (!want.has(el.dataset.card)) el.remove();
+  let before = container.firstElementChild;
+  for (const i of items) {
+    let el = [...container.children].find((c) => c.dataset.card === i.key);
+    if (!el) {
+      el = doc.createElement("article");
+      el.dataset.card = i.key;
+      el.innerHTML = `<header class="card-head"></header><div class="card-meta"></div><div class="card-body"></div><div class="card-ask"></div><div class="card-reply"><div class="card-quick"></div><form class="card-form" data-card-form><input class="card-input" aria-label="Reply to ${esc(nameOf(i))}" placeholder="${i.state === "working" ? "Queue a message" : "Reply"}" autocomplete="off"><button class="btn small primary">Send</button></form><p class="card-note"></p></div>`;
+    }
+    if (el !== before) container.insertBefore(el, before);
+    before = el.nextElementSibling;
+    el.className = `card ${size} s-${i.state}`;
+    setPart(el.querySelector(".card-head"), cardHead(i));
+    setPart(el.querySelector(".card-meta"), cardMeta(i));
+    setPart(el.querySelector(".card-body"), cardBody(i, size), true);
+    setPart(el.querySelector(".card-ask"), cardAsk(i));
+    setPart(el.querySelector(".card-quick"), cardQuick(i));
+    el.querySelector(".card-reply").hidden = !i.herdr || i.state === "needs-answer";
+  }
+}
+
+/** What layouts get: the sessions, their cards, and the actions behind a card's buttons. */
+const deck = {
+  sessions: sessionsInOrder,
+  cards,
+  open: (key) => openFromLayout(key),
+  send: (key, text) => post("/api/herdr/prompt", { key, text }),
+  press: (key, k) => post("/api/herdr/keys", { key, keys: [k] }),
+  markdown,
+  esc,
+};
+window.AgentDeck = { registerLayout, ...deck };
+
+/** Loads what the cards on show need: their conversations, the screen of a question. */
+async function refreshCards() {
+  if (!inbox) return;
+  const roots = [$("layout-root"), pip && pip.document.getElementById("pip-root")].filter(Boolean);
+  const keys = new Set(roots.flatMap((r) => [...r.querySelectorAll("[data-card]")].map((c) => c.dataset.card)));
+  await Promise.all([...keys].map((k) => inbox.items.find((x) => x.key === k)).filter(Boolean).map(loadCard));
+  paintLayout();
+}
+
+function paintLayout() {
+  const l = layouts.get(currentLayout);
+  if (l && l.paint && inbox) {
+    try {
+      l.paint($("layout-root"), deck);
+    } catch (e) {
+      $("layout-root").innerHTML = `<div class="layout-empty error">The ${esc(l.label)} layout failed: ${esc(e.message)}</div>`;
+    }
+  }
+  paintPip();
+}
+
+function paintLayoutSwitch() {
+  const buttons = [...layouts.values()].map((l) => `<button data-layout="${esc(l.id)}" aria-pressed="${l.id === currentLayout}" title="${esc(l.title || l.label)}">${esc(l.label)}</button>`);
+  if ("documentPictureInPicture" in window) buttons.push(`<button data-popout aria-pressed="${!!pip}" title="A small window that stays on top: what waits on you">Pop out</button>`);
+  const html = buttons.join("");
+  if (shown.layouts !== html) $("layouts").innerHTML = shown.layouts = html;
+  document.body.dataset.layout = currentLayout;
+}
+
+function setLayout(id) {
+  if (!layouts.has(id)) id = "focus";
+  if (id === currentLayout) return;
+  const old = layouts.get(currentLayout);
+  try {
+    if (old && old.dispose) old.dispose();
+  } catch {
+    // its own business
+  }
+  currentLayout = id;
+  store("layout", id);
+  $("layout-root").innerHTML = "";
+  shown = {};
+  paintLayoutSwitch();
+  paint();
+  if (id !== "focus") void refreshCards();
+}
+
+/** A card's title opens the session, one at a time (Focus). */
+function openFromLayout(key) {
+  window.focus();
+  setLayout("focus");
+  openSession(key);
+}
+
+async function cardAct(key, card, run) {
+  const note = card.querySelector(".card-note");
+  try {
+    await run();
+    if (note) ((note.textContent = "Sent."), (note.className = "card-note ok"));
+    setTimeout(() => {
+      const st = cardState.get(key);
+      if (st) st.screenSince = null; // read what it asks next
+      void refreshCards();
+    }, 900);
+    return true;
+  } catch (e) {
+    if (note) ((note.textContent = e.message), (note.className = "card-note error"));
+    return false;
+  }
+}
+
+/** The cards' buttons and reply boxes, in this page and in the popped-out window. */
+function cardClick(ev) {
+  const card = ev.target.closest && ev.target.closest("[data-card]");
+  if (!card) return;
+  const key = card.dataset.card;
+  if (ev.target.closest("[data-card-open]")) return openFromLayout(key);
+  const k = ev.target.closest("[data-card-key]");
+  if (k) return void cardAct(key, card, () => deck.press(key, k.dataset.cardKey));
+  const q = ev.target.closest("[data-card-quick]");
+  if (q) return void cardAct(key, card, () => deck.send(key, q.dataset.cardQuick));
+}
+function cardSubmit(ev) {
+  const form = ev.target.closest && ev.target.closest("[data-card-form]");
+  if (!form) return;
+  ev.preventDefault();
+  const card = form.closest("[data-card]");
+  const input = form.querySelector(".card-input");
+  const text = input.value.trim();
+  if (text) void cardAct(card.dataset.card, card, () => deck.send(card.dataset.card, text)).then((ok) => ok && (input.value = ""));
+}
+$("layout-root").addEventListener("click", cardClick);
+$("layout-root").addEventListener("submit", cardSubmit);
+$("layouts").addEventListener("click", (ev) => {
+  const b = ev.target.closest("[data-layout]");
+  if (b) return setLayout(b.dataset.layout);
+  if (ev.target.closest("[data-popout]")) void popOut();
+});
+
+// Pop out: a small window that stays on top of everything (Document Picture-in-Picture).
+let pip = null;
+
+async function popOut() {
+  if (pip) return pip.focus();
+  try {
+    pip = await documentPictureInPicture.requestWindow({ width: 400, height: 640 });
+  } catch (e) {
+    return alert(e.message);
+  }
+  for (const style of document.querySelectorAll("style")) pip.document.head.appendChild(style.cloneNode(true));
+  pip.document.title = "Agent Deck";
+  pip.document.body.className = "pip";
+  pip.document.body.innerHTML = `<div id="pip-root"><header class="pip-head"><b>Agent Deck</b><span class="sub" id="pip-summary"></span></header><div class="layout-empty" id="pip-empty">Nothing waits on you.</div><div class="mini-list"></div></div>`;
+  pip.document.addEventListener("click", cardClick);
+  pip.document.addEventListener("submit", cardSubmit);
+  pip.addEventListener("pagehide", () => {
+    pip = null;
+    shown.layouts = "";
+    paintLayoutSwitch();
+  });
+  shown.layouts = "";
+  paintLayoutSwitch();
+  paintPip();
+  void refreshCards();
+}
+
+/** The popped-out window: the sessions that wait on you, small. */
+function paintPip() {
+  if (!pip || !inbox) return;
+  const list = sessionsInOrder().filter((i) => i.state === "needs-answer" || i.state === "your-turn");
+  const d = pip.document;
+  d.getElementById("pip-empty").hidden = list.length > 0;
+  d.getElementById("pip-summary").textContent = $("summary").textContent;
+  cards(d.querySelector(".mini-list"), list, "mini");
+}
+
+registerLayout({ id: "focus", label: "Focus", title: "One session at a time, with its details" });
+registerLayout({
+  id: "deck",
+  label: "Deck",
+  title: "Sessions side by side, as columns",
+  paint(root, d) {
+    if (!root.querySelector(".deck-cols")) root.innerHTML = `<div class="deck-cols"></div><div class="layout-empty" hidden>No running sessions.</div>`;
+    const list = d.sessions();
+    root.querySelector(".layout-empty").hidden = list.length > 0;
+    d.cards(root.querySelector(".deck-cols"), list, "column");
+  },
+});
+registerLayout({
+  id: "grid",
+  label: "Grid",
+  title: "Every session as a tile",
+  paint(root, d) {
+    if (!root.querySelector(".grid-tiles")) root.innerHTML = `<div class="grid-tiles"></div><div class="layout-empty" hidden>No running sessions.</div>`;
+    const list = d.sessions();
+    root.querySelector(".layout-empty").hidden = list.length > 0;
+    d.cards(root.querySelector(".grid-tiles"), list, "tile");
+  },
+});
+
 // ------------------------------------------------------------ painting and events
 
 /** Repaints what changed: the list, the header, and the parts of the session on show. */
@@ -1644,6 +2033,8 @@ function paint() {
   pickDefault();
   saveHash();
   paintHeader();
+  paintLayoutSwitch();
+  if (currentLayout !== "focus") return void paintLayout();
   paintNav();
   layout();
   if (special()) return;
@@ -2022,6 +2413,7 @@ $("app").addEventListener("input", (ev) => {
 
 for (const id of SPECIAL) {
   $(id).onclick = () => {
+    if (currentLayout !== "focus") return void (setLayout("focus"), openSession(id));
     if (selected !== id) return openSession(id);
     selected = null; // back to the sessions
     shown = {};
@@ -2052,6 +2444,8 @@ $("app").addEventListener("click", async (ev) => {
 setInterval(() => {
   if ((token || mode === "remote") && !document.hidden) void loadInbox();
 }, 5000);
+
+/*@layouts*/
 
 if (!phone.matches) document.body.dataset.view = "session";
 if (!token && mode === "local") $("main").innerHTML = '<div class="error empty">Open the full URL that agent-deck printed (it carries the access token).</div>';

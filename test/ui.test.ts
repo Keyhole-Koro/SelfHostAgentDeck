@@ -127,6 +127,20 @@ describe("page", { skip: (!chromium && "no browser") || (process.platform !== "l
     transcript("old", [{ type: "ai-title", aiTitle: "Old idea" }]);
     running("old", proc(), { status: "idle", statusUpdatedAt: Date.now() - 5 * 864e5 });
 
+    const layouts = join(home, "layouts");
+    mkdirSync(layouts, { recursive: true });
+    writeFileSync(
+      join(layouts, "asks.js"),
+      `const closing = "</script>"; // must not end the page's script
+AgentDeck.registerLayout({
+  id: "asks",
+  label: "Asks",
+  paint(root, deck) {
+    if (!root.firstChild) root.innerHTML = '<div class="grid-tiles"></div>';
+    deck.cards(root.firstChild, deck.sessions().filter((s) => s.state === "needs-answer"), "tile");
+  },
+});`,
+    );
     const herdr = join(home, "herdr");
     const agents = [
       { pane_id: "w1:p1", agent_status: "blocked", agent: "claude", terminal_id: "t1", workspace_id: "w1", tab_id: "w1:t1", focused: false, revision: 1 },
@@ -165,7 +179,7 @@ esac
 
     const server = spawn(process.execPath, [CLI, "view", "--port", "0"], {
       cwd: repo,
-      env: { ...process.env, HOME: home, CLAUDE_CONFIG_DIR: "", CODEX_HOME: "", XDG_STATE_HOME: "", AGENT_DECK_STATE_DIR: "", AGENT_DECK_HERDR: herdr, AGENT_DECK_GH: gh, AGENT_DECK_WATCH_MS: "300" },
+      env: { ...process.env, HOME: home, CLAUDE_CONFIG_DIR: "", CODEX_HOME: "", XDG_STATE_HOME: "", AGENT_DECK_STATE_DIR: "", AGENT_DECK_HERDR: herdr, AGENT_DECK_GH: gh, AGENT_DECK_WATCH_MS: "300", AGENT_DECK_LAYOUTS_DIR: join(home, "layouts") },
     });
     kids.push(server);
     url = await new Promise<string>((resolve) => server.stdout!.on("data", (d: Buffer) => /http:\S+/.test(String(d)) && resolve(/http:\S+/.exec(String(d))![0])));
@@ -373,6 +387,45 @@ esac
     );
     for (const [sel, bg] of backgrounds) assert.ok(!/rgb\(25[0-5], 25[0-5], 25[0-5]\)/.test(bg!), `${sel} is ${bg}`);
     await dark.close();
+  });
+
+  it("shows many sessions at once: Deck, as columns you can answer from", async () => {
+    await page.click('#layouts [data-layout="deck"]');
+    await page.waitForSelector('#layout-root .deck-cols .card[data-card="claude:chatty"] .card-body .msg');
+    const keys = await page.locator("#layout-root .card").evaluateAll((els) => els.map((e) => (e as HTMLElement).dataset.card));
+    assert.ok(keys.includes("claude:asker") && keys.includes("claude:chatty"), keys.join(" "));
+    assert.ok(!keys.includes("claude:builder") && !keys.includes("claude:old"), "not those put off or idle");
+    assert.equal(keys[0], "claude:asker", "the most urgent first");
+    assert.match(await page.locator('.card[data-card="claude:chatty"] .card-body').innerText(), /answer 44/);
+    assert.equal(await page.locator(".app").isVisible(), false);
+    const card = page.locator('.card[data-card="claude:chatty"]');
+    await card.locator(".card-input").fill("hello from the deck");
+    await card.locator(".card-input").press("Enter");
+    await until(() => herdrCalls().includes("agent prompt w1:p3 hello from the deck"));
+    assert.equal(await card.locator(".card-input").inputValue(), "", "sent, and cleared");
+    await shot("6-deck");
+  });
+
+  it("shows every session as a tile, with the choices of a question one tap away", async () => {
+    await page.click('#layouts [data-layout="grid"]');
+    const asker = page.locator('#layout-root .grid-tiles .card[data-card="claude:asker"]');
+    await asker.locator('.card-ask [data-card-key="2"]').waitFor();
+    assert.match(await asker.locator(".card-ask").innerText(), /Which default sort\?[\s\S]*Newest/);
+    await asker.locator('.card-ask [data-card-key="2"]').click();
+    await until(() => herdrCalls().includes("agent send-keys w1:p1 2"));
+    await asker.locator("[data-card-open]").click();
+    await page.waitForSelector('.session[data-key="claude:asker"][aria-current="true"]');
+    assert.equal(await page.locator('#layouts [data-layout="focus"]').getAttribute("aria-pressed"), "true", "a card's title opens it in Focus");
+  });
+
+  it("takes layouts of your own from ~/.config/agent-deck/layouts", async () => {
+    await page.click('#layouts [data-layout="asks"]');
+    await page.waitForSelector("#layout-root .grid-tiles .card");
+    const keys = await page.locator("#layout-root .card").evaluateAll((els) => els.map((e) => (e as HTMLElement).dataset.card).sort());
+    assert.deepEqual(keys, ["claude:asker", "claude:planner"]);
+    const popout = await page.evaluate(() => "documentPictureInPicture" in window);
+    assert.equal(await page.locator("#layouts [data-popout]").count(), popout ? 1 : 0, "Pop out where the browser can");
+    await page.click('#layouts [data-layout="focus"]');
   });
 
   it("logged no errors", () => {
