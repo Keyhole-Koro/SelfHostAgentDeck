@@ -189,7 +189,7 @@ a.file { text-decoration: underline dotted; text-underline-offset: 2px; }
 .label { font-size: 11px; font-weight: 650; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); margin-bottom: 4px; }
 
 /* ---------------------------------------------------------------- dock: question, keys, reply */
-.dock { flex: none; border-top: 1px solid var(--line); background: var(--bg); }
+.dock { flex: none; border-top: 1px solid var(--line); background: var(--bg); max-height: 75%; overflow-y: auto; }
 .dock .col { padding: 10px 24px calc(12px + env(safe-area-inset-bottom)); }
 .asking { padding: 2px 0 2px 12px; border-left: 3px solid var(--urgent); margin-bottom: 8px; }
 .asking-top { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; }
@@ -202,6 +202,19 @@ button.opt:hover { border-color: var(--accent); color: var(--accent); }
 .keypad { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; align-items: center; }
 .key { min-width: 38px; border: 1px solid var(--line); background: transparent; border-radius: 8px; padding: 3px 9px; cursor: pointer; font-size: 13px; font-family: var(--mono); }
 .key:hover { background: var(--hover); }
+.choices { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+.choice { display: flex; gap: 10px; align-items: baseline; text-align: left; border: 1px solid var(--line); background: transparent; border-radius: 10px; padding: 9px 12px; cursor: pointer; font-size: 14px; line-height: 1.45; }
+.choice:hover, .choice.selected { border-color: var(--accent); }
+.choice .k { flex: none; font-family: var(--mono); font-size: 12px; color: var(--muted); min-width: 1.1em; }
+.more-keys { margin-top: 10px; font-size: 13px; }
+.more-keys > summary { cursor: pointer; color: var(--muted); width: fit-content; }
+.plan-doc { margin: 8px 0 4px; }
+.plan-doc > summary { cursor: pointer; font-weight: 600; }
+.plan-doc .md { max-height: 42vh; overflow-y: auto; margin-top: 6px; padding-right: 6px; }
+.quick { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; margin-bottom: 8px; }
+.chip-btn { flex: none; border: 1px solid var(--line); background: transparent; border-radius: 999px; padding: 4px 12px; font-size: 13px; cursor: pointer; white-space: nowrap; }
+.chip-btn:hover { background: var(--hover); }
+.chip-btn.ghost { color: var(--muted); }
 .screen { margin: 10px 0 0; padding: 10px 12px; background: var(--code-bg); border-radius: 8px; font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 28vh; overflow-y: auto; }
 .composer { display: flex; gap: 8px; align-items: flex-end; border: 1px solid var(--line); background: var(--field); border-radius: 14px; padding: 6px 6px 6px 12px; }
 .composer:focus-within { border-color: var(--accent); }
@@ -318,7 +331,8 @@ table.clean th { font-size: 12px; color: var(--muted); font-weight: 600; }
 /* ---------------------------------------------------------------- touch */
 @media (pointer: coarse) {
   .btn, .tbtn { min-height: 36px; }
-  .key, .opt { min-height: 40px; }
+  .key, .opt, .chip-btn { min-height: 40px; }
+  .choice { padding: 12px 14px; }
   .session { padding-top: 10px; padding-bottom: 11px; }
   .entry { padding: 9px 8px; }
   .tabs button { padding: 10px 12px 11px; }
@@ -457,6 +471,10 @@ const toggle = (set, k) => (set.has(k) ? set.delete(k) : set.add(k));
 let comments = stored("comments", {}); // session → [{ file, header, excerpt, text }]
 let notifyOn = stored("notify", false) && typeof Notification !== "undefined" && Notification.permission === "granted";
 let tab = TABS.includes(stored("tab", "chat")) ? stored("tab", "chat") : "chat";
+/** One-tap replies above the reply box; yours to change. */
+const QUICK = /^ja\b/.test(navigator.language || "") ? ["続けて", "それで進めて", "コミットして", "テストを実行して"] : ["Continue", "Go ahead", "Commit your changes", "Run the tests"];
+let quick = stored("quick", QUICK);
+let keysOpen = false; // the keypad and the screen, under a question with choices
 
 const headers = () => ({ "content-type": "application/json", "x-agent-diff": "1", ...(token && { "x-token": token }) });
 async function api(path, init = {}) {
@@ -714,7 +732,7 @@ $("notify").onclick = async () => {
 
 function paintHead(e) {
   const i = e && e.item;
-  const key = JSON.stringify(e ? { k: e.key, s: e.state, i: i && [i.title, i.name, i.cwd, i.since, i.jobId, i.herdr, i.hold, i.agent, Math.round((i.memory || 0) / 5e7)], x: e.session && e.session.lastAt } : null);
+  const key = JSON.stringify(e ? { k: e.key, s: e.state, i: i && [i.title, i.name, i.cwd, i.since, i.jobId, i.herdr, i.hold, i.agent, i.model, Math.round((i.memory || 0) / 5e7)], x: e.session && e.session.lastAt } : null);
   if (key === shown.head) return;
   shown.head = key;
   const back = `<button class="back" data-act="back" aria-label="Back to the sessions">‹</button>`;
@@ -737,6 +755,7 @@ function paintHead(e) {
     i.title && i.title !== i.name ? `<span>${esc(i.name)}</span>` : "",
     `<span class="path">${esc(i.cwd || "")}</span>`,
     `<span title="${esc(new Date(i.since).toLocaleString())}">${ago(i.since)}</span>`,
+    i.model ? `<span title="Model">${esc(i.model)}</span>` : "",
     i.herdr ? `<span title="herdr pane">herdr ${esc(i.herdr.pane)} · ${esc(i.herdr.status)}</span>` : "",
   ].join("");
   const held = i.hold ? `<span class="pill">${i.hold.kind === "later" && i.hold.until ? `Later, until ${esc(when(i.hold.until))}` : "Done for now"}</span>` : "";
@@ -900,13 +919,15 @@ function stepsHtml(steps, last) {
 
 function paintDock(e) {
   const i = e && e.item;
-  const key = i ? JSON.stringify([i.key, i.state, !!i.herdr, i.reason, i.questions, i.hold]) : e ? e.key : "";
+  const key = i ? JSON.stringify([i.key, i.state, !!i.herdr, i.reason, i.questions, i.plan, i.hold, quick]) : e ? e.key : "";
   if (key === shown.dock) return;
   shown.dock = key;
   let html = "";
   if (i && i.state === "needs-answer") html += askHtml(i);
   if (i && i.herdr && i.state !== "needs-answer") {
-    html += `<div class="composer"><textarea id="prompt" rows="1" aria-label="Message to the session" placeholder="${i.state === "working" ? "Queue a message" : "Reply"}" title="Ctrl+Enter sends">${esc(drafts.get(i.key) || "")}</textarea><button class="btn primary" data-act="prompt">Send</button></div>`;
+    if (i.state === "your-turn" && !i.hold) html += `<div class="quick">${quick.map((q) => `<button class="chip-btn" data-quick="${esc(q)}">${esc(q)}</button>`).join("")}<button class="chip-btn ghost" data-act="edit-quick" title="Change these replies">✎</button></div>`;
+    const stop = i.state === "working" ? `<button class="btn" data-key-press="esc" title="Interrupt it (Esc)">Stop</button>` : "";
+    html += `<div class="composer"><textarea id="prompt" rows="1" aria-label="Message to the session" placeholder="${i.state === "working" ? "Queue a message" : "Reply"}" title="Ctrl+Enter sends">${esc(drafts.get(i.key) || "")}</textarea>${stop}<button class="btn primary" data-act="prompt">Send</button></div>`;
     if (i.state === "working") html += `<p class="sub hint">It is working; your message waits in its queue.</p>`;
   } else if (i && !i.herdr && (waiting(i) || i.state === "needs-answer")) {
     html += `<p class="note">To answer from this page, run it in a <a href="https://herdr.dev" target="_blank" rel="noopener">herdr</a> pane. Or go back to it: <code class="cmd">${esc(i.resume)}</code> <button class="btn small" data-copy="${esc(i.resume)}">Copy</button></p>`;
@@ -918,20 +939,31 @@ function paintDock(e) {
   if (i && i.state === "needs-answer" && i.herdr && !screens.has(i.key)) void act("screen");
 }
 
+/**
+ * What a waiting session asks: its plan when it wants one approved, the choices its dialog offers
+ * (read off its screen, one tap each), and the keys and screen themselves, folded away when the
+ * choices are there.
+ */
 function askHtml(i) {
+  const seen = screens.get(i.key);
+  const p = i.herdr && seen && seen.prompt;
   let html = `<div class="asking"><div class="asking-top"><span class="reason">${esc(i.reason || "input needed")}</span></div>`;
-  let numbered = false;
-  for (const q of i.questions || []) {
-    html += `<div class="q">${esc(q.question)}</div>`;
-    if (!q.options.length) continue;
-    numbered = numbered || !!i.herdr;
-    html += `<div class="opts">${q.options.map((o, n) => (i.herdr ? `<button class="opt" data-key-press="${n + 1}">${n + 1}. ${esc(o)}</button>` : `<span class="opt">${n + 1}. ${esc(o)}</span>`)).join("")}</div>`;
+  if (i.plan) html += `<details class="plan-doc" open><summary>The plan</summary><div class="md">${markdown(i.plan)}</div></details>`;
+  const questions = (i.questions || []).map((q) => q.question);
+  if (p) {
+    if (!questions.length && p.question) questions.push(p.question);
+    html += questions.map((q) => `<div class="q">${esc(q)}</div>`).join("");
+    html += `<div class="choices">${p.choices.map((c) => `<button class="choice${c.selected ? " selected" : ""}" data-key-press="${c.key}"><span class="k">${c.key}</span><span>${esc(c.label)}</span></button>`).join("")}</div>`;
+  } else {
+    for (const q of i.questions || []) {
+      html += `<div class="q">${esc(q.question)}</div>`;
+      if (q.options.length) html += `<div class="opts">${q.options.map((o, n) => (i.herdr ? `<button class="opt" data-key-press="${n + 1}">${n + 1}. ${esc(o)}</button>` : `<span class="opt">${n + 1}. ${esc(o)}</span>`)).join("")}</div>`;
+    }
   }
   if (i.herdr) {
-    const keys = [...(numbered ? [] : ["1", "2", "3", "4"]), "up", "down", "enter", "esc", "y", "n"];
+    const keys = ["up", "down", "enter", "esc", "y", "n", "1", "2", "3", "4"];
     const names = { up: "↑", down: "↓", enter: "Enter", esc: "Esc" };
-    html += `<div class="keypad">${keys.map((k) => `<button class="key" data-key-press="${k}">${names[k] || k}</button>`).join("")}<button class="btn small" data-act="screen">Its screen</button></div>`;
-    html += `<pre class="screen" id="screen" ${screens.has(i.key) ? "" : "hidden"}>${esc(screens.get(i.key) || "")}</pre>`;
+    html += `<details class="more-keys"${p && !keysOpen ? "" : " open"}><summary>Keys and its screen</summary><div class="keypad">${keys.map((k) => `<button class="key" data-key-press="${k}">${names[k] || k}</button>`).join("")}<button class="btn small" data-act="screen">Read it again</button></div><pre class="screen" id="screen">${esc(seen ? seen.text : "Reading its screen…")}</pre></details>`;
   }
   return html + `</div>`;
 }
@@ -1415,21 +1447,26 @@ async function act(name, el) {
       await post("/api/release", { key: i.key });
       await loadInbox();
     } else if (name === "screen") {
-      const { text } = await api(`/api/herdr/screen?key=${encodeURIComponent(i.key)}`);
-      screens.set(i.key, text);
-      if (!$("screen")) return;
-      $("screen").textContent = text;
-      $("screen").hidden = false;
-      $("screen").scrollTop = $("screen").scrollHeight;
+      screens.set(i.key, await api(`/api/herdr/screen?key=${encodeURIComponent(i.key)}`));
+      if (selected !== i.key) return;
+      shown.dock = "";
+      paintDock(entry(selected));
+      if ($("screen")) $("screen").scrollTop = $("screen").scrollHeight;
     } else if (name === "prompt") {
       const text = $("prompt").value.trim();
       if (!text) return;
-      await post("/api/herdr/prompt", { key: i.key, text });
+      await sendPrompt(i, text);
       drafts.delete(i.key);
-      $("prompt").value = "";
-      grow($("prompt"));
-      note("answer-note", "Sent.", true);
-      setTimeout(() => void loadChat("newer"), 1500);
+      if ($("prompt")) ($("prompt").value = ""), grow($("prompt"));
+    } else if (name === "quick") {
+      await sendPrompt(i, el.dataset.quick);
+    } else if (name === "edit-quick") {
+      const v = window.prompt("One-tap replies, separated by |", quick.join(" | "));
+      if (v === null) return;
+      quick = v.split("|").map((x) => x.trim()).filter(Boolean);
+      store("quick", quick);
+      shown.dock = "";
+      paint();
     } else if (name === "copy-review") {
       await navigator.clipboard.writeText(reviewText(selected));
       note("review-note", "Copied. Paste it into the session.", true);
@@ -1450,13 +1487,20 @@ async function act(name, el) {
   }
 }
 
+async function sendPrompt(i, text) {
+  await post("/api/herdr/prompt", { key: i.key, text });
+  const n = $("answer-note");
+  if (n) ((n.textContent = "Sent."), (n.className = "note ok"));
+  setTimeout(() => void loadChat("newer"), 1500);
+}
+
 async function pressKey(k) {
   const i = entry(selected) && entry(selected).item;
   try {
     await post("/api/herdr/keys", { key: i.key, keys: [k] });
     $("answer-note").textContent = `Sent ${k}.`;
     $("answer-note").className = "note ok";
-    setTimeout(() => $("screen") && act("screen"), 600); // show what it did
+    setTimeout(() => $("screen") && act("screen"), 700); // show what it did, and what it asks next
   } catch (e) {
     $("answer-note").textContent = e.message;
     $("answer-note").className = "note error";
@@ -1523,6 +1567,8 @@ $("app").addEventListener("click", (ev) => {
   if (a) return void act(a.dataset.act, a);
   const k = t.closest("[data-key-press]");
   if (k) return void pressKey(k.dataset.keyPress);
+  const q = t.closest("[data-quick]");
+  if (q) return void act("quick", q);
   const c = t.closest("[data-comment]");
   if (c) {
     const ed = [...document.querySelectorAll("[data-editor]")].find((x) => x.dataset.editor === c.dataset.comment);
@@ -1564,6 +1610,11 @@ $("app").addEventListener("click", (ev) => {
   }
 });
 
+// Opened or closed by you (a details drawn open fires "toggle" too, so count clicks).
+$("dock").addEventListener("click", (ev) => {
+  const summary = ev.target.closest && ev.target.closest("details.more-keys > summary");
+  if (summary) keysOpen = !summary.parentElement.open;
+});
 // Remember which runs of steps were opened, across repaints.
 $("chat").addEventListener("toggle", (ev) => {
   const d = ev.target;

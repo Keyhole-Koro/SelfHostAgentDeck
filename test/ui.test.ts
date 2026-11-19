@@ -108,7 +108,10 @@ describe("page", { skip: (!chromium && "no browser") || (process.platform !== "l
     running("builder", proc("w1:p2"), { status: "idle" });
 
     transcript("fixer", [{ type: "ai-title", aiTitle: "Fix z" }, tool("e2", "Edit", { file_path: join(repo, "shared.ts"), old_string: "const z = 26;", new_string: "const z = 26;\nconst fixed = true;" })]);
-    running("fixer", proc(), { status: "busy" });
+    running("fixer", proc("w1:p5"), { status: "busy" });
+
+    transcript("planner", [{ type: "ai-title", aiTitle: "Plan the export" }, tool("x1", "ExitPlanMode", { plan: "## Export plan\n\n1. Add a CSV writer\n2. Wire the button" })]);
+    running("planner", proc("w1:p4"), { status: "waiting", waitingFor: "approve ExitPlanMode", statusUpdatedAt: Date.now() - 120_000 });
 
     writeFileSync(join(repo, "notes.md"), "# Release notes\n\n- due dates\n");
     writeFileSync(join(repo, ".env"), "TOKEN=secret");
@@ -127,6 +130,8 @@ describe("page", { skip: (!chromium && "no browser") || (process.platform !== "l
       { pane_id: "w1:p1", agent_status: "blocked", agent: "claude", terminal_id: "t1", workspace_id: "w1", tab_id: "w1:t1", focused: false, revision: 1 },
       { pane_id: "w1:p2", agent_status: "idle", agent: "claude", terminal_id: "t2", workspace_id: "w1", tab_id: "w1:t1", focused: false, revision: 1 },
       { pane_id: "w1:p3", agent_status: "idle", agent: "claude", terminal_id: "t3", workspace_id: "w1", tab_id: "w1:t1", focused: false, revision: 1 },
+      { pane_id: "w1:p4", agent_status: "blocked", agent: "claude", terminal_id: "t4", workspace_id: "w1", tab_id: "w1:t1", focused: false, revision: 1 },
+      { pane_id: "w1:p5", agent_status: "working", agent: "claude", terminal_id: "t5", workspace_id: "w1", tab_id: "w1:t1", focused: false, revision: 1 },
     ];
     writeFileSync(
       herdr,
@@ -167,17 +172,33 @@ esac
   it("groups the sessions under their project and opens on the one that needs an answer", async () => {
     await page.waitForSelector('.session[data-key="claude:asker"][aria-current="true"]');
     assert.match(await page.locator(".project").first().innerText(), new RegExp(repo.split("/").pop()!));
-    assert.match(await page.locator("#dock").innerText(), /Which default sort\?[\s\S]*1\. Relevance/);
-    assert.match(await page.locator("#summary").innerText(), /1 needs an answer/);
+    assert.match(await page.locator("#dock").innerText(), /Which default sort\?[\s\S]*Relevance[\s\S]*Newest/);
+    assert.match(await page.locator("#summary").innerText(), /2 need an answer/);
   });
 
-  it("answers through herdr: shows the screen and sends a key", async () => {
-    await page.click('[data-act="screen"]');
-    await page.waitForSelector("#screen:not([hidden])");
-    assert.match(await page.locator("#screen").innerText(), /1\. Relevance/);
+  it("answers through herdr with one tap on a choice its screen shows", async () => {
+    await page.waitForSelector("#dock .choice");
+    assert.deepEqual(await page.locator("#dock .choice span:last-child").allInnerTexts(), ["Relevance", "Newest"]);
+    assert.equal(await page.locator("#screen").isVisible(), false, "the raw screen is folded away");
     await shot("1-needs-answer");
-    await page.click('[data-key-press="1"]');
+    await page.click('#dock .choice[data-key-press="1"]');
     await until(() => herdrCalls().includes("agent send-keys w1:p1 1"));
+    await page.click("#dock .more-keys > summary");
+    assert.match(await page.locator("#screen").innerText(), /1\. Relevance/);
+  });
+
+  it("shows the plan a session wants approved", async () => {
+    await page.click('.session[data-key="claude:planner"]');
+    await page.waitForSelector("#dock .plan-doc .md h2");
+    assert.equal(await page.locator("#dock .plan-doc .md h2").innerText(), "Export plan");
+    assert.equal(await page.locator("#dock .plan-doc .md ol li").count(), 2);
+    await page.waitForSelector("#dock .choice");
+  });
+
+  it("stops a working session with one tap", async () => {
+    await page.click('.session[data-key="claude:fixer"]');
+    await page.click('#dock [data-key-press="esc"]');
+    await until(() => herdrCalls().includes("agent send-keys w1:p5 esc"));
   });
 
   it("shows what a finished session did: recap, prompt, tasks, PR, shared file", async () => {
@@ -200,6 +221,8 @@ esac
     await page.fill("#prompt", "Open the PR");
     await page.click('[data-act="prompt"]');
     await until(() => herdrCalls().includes("agent prompt w1:p2 Open the PR"));
+    await page.click('#dock [data-quick="Continue"]');
+    await until(() => herdrCalls().includes("agent prompt w1:p2 Continue"));
     await page.click('[data-tab="changes"]');
     await page.waitForSelector(".comment-btn");
     await page.locator(".comment-btn").first().click();
