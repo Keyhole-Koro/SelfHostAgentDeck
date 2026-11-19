@@ -66,14 +66,16 @@ const MARKDOWN = new Set([".md", ".markdown", ".mdx"]);
 /** Names of files that commonly hold secrets: never listed or shown. */
 export function secret(name: string): boolean {
   const n = name.toLowerCase();
-  if (/^\.env(\..+)?$/.test(n)) return !/^\.env\.(example|sample|template|dist|defaults)$/.test(n);
+  if (/^\.env(rc)?(\..+)?$/.test(n)) return !/^\.env(rc)?\.(example|sample|template|dist|defaults)$/.test(n);
   return (
     /^\.dev\.vars(\..+)?$/.test(n) ||
-    /\.(pem|key|p12|pfx|jks|keystore|tfvars|tfstate|tfstate\.backup)$/.test(n) ||
+    /\.(pem|key|p8|p12|pfx|ppk|jks|keystore|tfvars|tfvars\.json|tfstate|tfstate\.backup)$/.test(n) ||
     /^id_(rsa|dsa|ecdsa|ed25519)/.test(n) ||
     /^\.?(npmrc|pypirc|netrc|pgpass|htpasswd)$/.test(n) ||
+    /^(\.git-credentials|\.terraformrc|terraform\.rc)$/.test(n) ||
     /^\.?credentials(\..+)?$/.test(n) ||
     /^service-account.*\.json$/.test(n) ||
+    /^(client_secret.*|application_default_credentials|.*firebase-adminsdk.*)\.json$/.test(n) ||
     /^secrets?\.(json|ya?ml|toml)$/.test(n)
   );
 }
