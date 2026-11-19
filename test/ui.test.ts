@@ -142,6 +142,8 @@ printf '%s\\n' "$*" >> "${herdrLog}"
 case "$1 $2" in
   "agent list") printf '%s\\n' '${JSON.stringify({ id: "l", result: { type: "agent_list", agents } })}' ;;
   "agent read") printf '%s\\n' '${JSON.stringify({ id: "r", result: { type: "pane_read", read: { text: "Which default sort?\n> 1. Relevance\n  2. Newest" } } })}' ;;
+  "workspace list") printf '%s\\n' '{"result":{"type":"workspace_list","workspaces":[]}}' ;;
+  "workspace create") printf '%s\\n' '{"result":{"type":"workspace_created","root_pane":{"pane_id":"w9:p1"},"tab":{},"workspace":{}}}' ;;
   *) printf '%s\\n' '{"id":"x","result":{"type":"agent_info"}}' ;;
 esac
 `,
@@ -248,6 +250,8 @@ esac
     await until(() => herdrCalls().includes("agent prompt w1:p2 Open the PR"));
     await page.click('#dock [data-quick="Continue"]');
     await until(() => herdrCalls().includes("agent prompt w1:p2 Continue"));
+    await page.selectOption('#dock [data-slash="model"]', "opus");
+    await until(() => herdrCalls().includes("agent prompt w1:p2 /model opus"));
     await page.setInputFiles("#attach", { name: "shot.png", mimeType: "image/png", buffer: Buffer.from([0x89, 0x50, 0x4e, 0x47]) });
     await page.waitForSelector("#dock .att");
     await page.fill("#prompt", "Look at this");
@@ -272,6 +276,20 @@ esac
     await page.click('[data-act="later"][data-until="1h"]');
     await page.waitForSelector('.fold[data-fold="held"]');
     assert.match(await page.locator('.fold[data-fold="held"]').innerText(), /1 on hold/);
+  });
+
+  it("starts a new session in herdr, with the model and effort picked", async () => {
+    await page.click("#new");
+    await page.waitForSelector("#ns-dir option", { state: "attached" });
+    assert.equal(await page.locator("#ns-dir").inputValue(), repo, "the folder of the session picked before");
+    await page.fill("#ns-model", "opus");
+    await page.selectOption("#ns-effort", "high");
+    await page.fill("#ns-prompt", "Add CSV export");
+    await page.click('[data-act="ns-start"]');
+    await until(() => herdrCalls().some((l) => /^agent start \S+ --kind claude --pane w9:p1 --timeout 60000 -- --session-id [0-9a-f-]{36} --model opus --effort high$/.test(l)));
+    await until(() => herdrCalls().includes("agent prompt w9:p1 Add CSV export"));
+    assert.match(await page.locator("#ns-note").innerText(), /Started/);
+    await page.click("#new");
   });
 
   it("lists what can be cleaned up", async () => {
