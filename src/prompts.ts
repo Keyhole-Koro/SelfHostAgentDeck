@@ -1,15 +1,20 @@
 /**
  * The choices an agent's dialog offers, read off its screen: Claude Code's permission prompts and
- * AskUserQuestion, Codex's approvals, plan approval. They are numbered lists at the bottom of the
- * screen ("❯ 1. Yes", "  2. Yes, and don't ask again …"); each number is the key that picks it.
- * Only the last list near the bottom counts: a list in the agent's message above is not a dialog.
+ * AskUserQuestion, Codex's approvals, plan approval. Mostly they are numbered lists at the bottom of
+ * the screen ("❯ 1. Yes", "  2. Yes, and don't ask again …"). Claude Code leaves the numbers out
+ * when its auto mode hands a call to you ("❯ Yes", "  No"); then the pointer, and the options level
+ * with it, make the list. Only the last list near the bottom counts: a list in the agent's message
+ * above is not a dialog.
+ *
+ * Picking one is done by moving the pointer to it and pressing Enter (see answer.ts), which works
+ * whether the list is numbered or not.
  */
 
 export interface PromptChoice {
-  /** The key that picks it: "1" to "9". */
+  /** Its place in the list, from "1": the number shown, when the list is numbered. */
   key: string;
   label: string;
-  /** Where the dialog's cursor is. */
+  /** Where the dialog's pointer is. */
   selected?: boolean;
 }
 
@@ -22,17 +27,33 @@ export interface ScreenPrompt {
 /** How far up from the bottom (in non-empty lines) a dialog's choices may start. */
 const NEAR_BOTTOM = 18;
 const OPTION = /^([❯›>▶●➜→]\s*)?(\d)[.)]\s+(.+?)$/;
+/** The pointer at the option a dialog would pick: Claude Code's ❯, Codex's ›. */
+const POINTER = /^[❯›▶➜→]\s+(\S.*)$/;
 const RULE = /^[─━═╭╮╰╯┌┐└┘\s-]+$/;
 
+interface Line {
+  text: string;
+  indent: number;
+}
+
 export function parsePrompt(screen: string): ScreenPrompt | undefined {
-  // Each line without the sides of the box dialogs are drawn in, keeping its indentation.
-  const rows = screen
-    .split("\n")
-    .map((raw) => {
-      const inner = raw.replace(/^\s*[│┃║|]/, "").replace(/[│┃║|]\s*$/, "");
-      return { text: inner.trim(), indent: inner.length - inner.trimStart().length };
-    })
-    .filter((r) => r.text && !RULE.test(r.text));
+  // Each line without the sides of the box dialogs are drawn in, keeping its indentation. A rule
+  // across the screen separates, like a blank line.
+  const lines: Line[] = screen.split("\n").map((raw) => {
+    const inner = raw.replace(/^\s*[│┃║|]/, "").replace(/[│┃║|]\s*$/, "");
+    const text = inner.trim();
+    return RULE.test(text) ? { text: "", indent: 0 } : { text, indent: inner.length - inner.trimStart().length };
+  });
+  const filled = lines.flatMap((l, f) => (l.text ? [f] : []));
+  const pointer = filled.slice(-NEAR_BOTTOM).reverse().find((f) => POINTER.test(lines[f]!.text));
+  if (pointer !== undefined && !OPTION.test(lines[pointer]!.text)) {
+    const p = unnumbered(lines, pointer);
+    if (p) return p;
+  }
+  return numbered(lines.filter((l) => l.text));
+}
+
+function numbered(rows: Line[]): ScreenPrompt | undefined {
   let last = -1;
   for (let f = rows.length - 1; f >= Math.max(0, rows.length - NEAR_BOTTOM); f--) {
     if (OPTION.test(rows[f]!.text)) {
@@ -55,4 +76,40 @@ export function parsePrompt(screen: string): ScreenPrompt | undefined {
   if (choices[0]?.key !== "1" || choices.some((c, n) => Number(c.key) !== n + 1)) return undefined;
   const above = rows[first - 1]?.text;
   return { ...(above && { question: above.replace(/^[☐☒✔✓□■◆◇•·]\s*/, "") }), choices };
+}
+
+/**
+ * Options without numbers: the one under the pointer and those whose text starts in the same
+ * column, up to a blank line; lines further in are an option's description. It is a dialog only if
+ * it asks something ("Do you want to proceed?") or says how to leave it ("Esc to cancel").
+ */
+function unnumbered(lines: Line[], at: number): ScreenPrompt | undefined {
+  // Where an option's text starts: after the pointer, on the line that has it.
+  const colOf = (f: number) => {
+    const l = lines[f]!;
+    const m = POINTER.exec(l.text);
+    return l.indent + (m ? l.text.length - m[1]!.length : 0);
+  };
+  const col = colOf(at);
+  const level = (f: number) => !!lines[f]!.text && colOf(f) === col;
+  let first = at;
+  let last = at;
+  for (let f = at - 1; f >= 0 && lines[f]!.text && colOf(f) >= col; f--) if (level(f)) first = f;
+  for (let f = at + 1; f < lines.length && lines[f]!.text && colOf(f) >= col; f++) if (level(f)) last = f;
+  const choices: PromptChoice[] = [];
+  for (let f = first; f <= last; f++) {
+    if (!level(f)) continue;
+    const m = POINTER.exec(lines[f]!.text);
+    choices.push({ key: String(choices.length + 1), label: m ? m[1]!.trim() : lines[f]!.text, ...(m && { selected: true }) });
+  }
+  if (choices.length < 2 || choices.length > 9 || choices.filter((c) => c.selected).length !== 1) return undefined;
+  let question: string | undefined;
+  for (let f = first - 1; f >= 0; f--) {
+    if (!lines[f]!.text) continue;
+    if (colOf(f) < col) question = lines[f]!.text;
+    break;
+  }
+  const leave = lines.slice(last + 1).some((l) => /\besc\b/i.test(l.text));
+  if (!question?.endsWith("?") && !leave) return undefined;
+  return { ...(question && { question }), choices };
 }

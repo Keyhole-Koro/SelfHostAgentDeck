@@ -54,6 +54,43 @@ describe("choices on an agent's screen", () => {
     assert.equal(parsePrompt(screen)!.question, "$ rm -rf dist");
   });
 
+  it("reads a permission prompt without numbers, as auto mode hands it over", () => {
+    const screen = [
+      "● I'll clean the build.",
+      "",
+      "──────────────────────────────────────────────",
+      " Bash command",
+      "",
+      "   rm -rf build",
+      "   Remove the build folder",
+      "",
+      " Do you want to proceed?",
+      " ❯ Yes",
+      "   No",
+      "",
+      " Esc to cancel · Tab to amend · ctrl+e to explain",
+    ].join("\n");
+    assert.deepEqual(parsePrompt(screen), {
+      question: "Do you want to proceed?",
+      choices: [
+        { key: "1", label: "Yes", selected: true },
+        { key: "2", label: "No" },
+      ],
+    });
+  });
+
+  it("finds the pointer on any option, and skips descriptions under them", () => {
+    const screen = [" Do you want to proceed?", "   Yes", "     Run it this once", " ❯ No", "     Tell Claude what to do instead", "", " Esc to cancel"].join("\n");
+    assert.deepEqual(parsePrompt(screen)!.choices, [{ key: "1", label: "Yes" }, { key: "2", label: "No", selected: true }]);
+  });
+
+  it("does not take the reply box, or one line under a pointer, for a dialog", () => {
+    const idle = ["● Done.", "──────────────────", "❯ fix the tests", "──────────────────", "  ⏵⏵ auto mode on (shift+tab to cycle)"].join("\n");
+    assert.equal(parsePrompt(idle), undefined);
+    const listed = ["Two ways:", "❯ keep it", "  drop it", "", "Your call."].join("\n");
+    assert.equal(parsePrompt(listed), undefined, "neither asks nor says how to leave");
+  });
+
   it("finds no dialog in a numbered list far above, or one that does not start at 1", () => {
     const message = ["Next steps:", "1. Add the schema", "2. Write the helper", ...Array.from({ length: 20 }, (_, n) => `line ${n}`), "> "].join("\n");
     assert.equal(parsePrompt(message), undefined);
