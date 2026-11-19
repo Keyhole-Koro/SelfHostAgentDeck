@@ -42,11 +42,26 @@ agent-diff view --since today   # start with a wider range
 The left side groups the sessions by project: a repository together with its worktrees. Projects
 with a session waiting on you come first. Within a project the sessions are sorted by what they
 need from you (see [Waiting on you](#waiting-on-you)), then come the sessions that ended but left
-changes in this repository; idle ones are folded away. Picking one shows, on the right, what it is
-waiting for or its last reply, and below that the hunks it made in its working tree, each with
-how sure the attribution is. `agent-diff
-inbox --view` is the same page started anywhere: it then shows the changes of running sessions
-only. The buttons above the changes choose the range:
+changes in this repository; idle ones are folded away. `agent-diff inbox --view` is the same page
+started anywhere: it then shows the changes of running sessions only.
+
+Picking a session shows it in tabs:
+
+| Tab | Shows |
+|---|---|
+| Conversation | What you and the session said, newest at the bottom; scroll up for earlier pages. Its tool calls fold into one line per run (open it for each step; the last run shows its latest step), and recaps, compactions and interruptions show where they happened. What it asks, and the reply box, stay at the bottom |
+| Changes | The hunks it made in its working tree, each with how sure the attribution is |
+| Files | Its repository, read-only: folders, Markdown rendered, code with line numbers, images. Paths in the conversation open here |
+| Details | Its tasks, background commands, pull requests, the pages it published, its context, and how to resume it. On a wide screen this is a column beside the conversation instead of a tab |
+
+On a phone the page shows the list, then one session full screen with Back; on a tablet, the list
+and the session side by side.
+
+Files stay inside the session's repository (its own folder outside one), never `.git`, and never
+files that commonly hold secrets (`.env`, keys, credentials, `tfstate`); a session that runs in
+your home folder shows none.
+
+The buttons above the changes choose the range:
 
 | Range | Shows |
 |---|---|
@@ -91,6 +106,9 @@ For each session it also shows, when the transcript says so:
 - **its context**: tokens in use, against the model's window (Codex) or the point where it last
   compacted (Claude Code), so you see which session will compact soon;
 - **shared files**: files another running session also has uncommitted changes in;
+- **pages it published** with the `artifact` tool or CLI of
+  [SelfHostArtifacts](https://github.com/Keyhole-Koro/SelfHostArtifacts) (or as a claude.ai
+  artifact), as links;
 - for Codex, how much of the 5-hour and weekly limits is used.
 
 Done with one for now? **Later** takes it off the list for an hour, until tomorrow, or
@@ -155,8 +173,8 @@ reloads itself every minute. It includes the end of each session's last reply.
 
 The page can also be served at a host name of yours, through a
 [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/),
-to devices you added: see what waits, answer it, send prompts, all from the phone. Like Claude
-Code's Remote Control, but on your own domain.
+to devices you added: see what waits, read back the conversation, answer it, send prompts, look
+at the files, all from the phone. Like Claude Code's Remote Control, but on your own domain.
 
 ```bash
 # Once: a tunnel from a host name in your Cloudflare DNS to this computer
