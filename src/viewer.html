@@ -87,7 +87,7 @@ body.special aside#side { display: none; }
 body.special main#main { grid-column: 2 / -1; }
 @media (min-width: 1680px) { .app { grid-template-columns: 320px minmax(0, 1fr) 400px; } :root { --col: 940px; } }
 @media (max-width: 1279px) { .app { grid-template-columns: 280px minmax(0, 1fr); } aside#side { display: none; } }
-@media (max-width: 1023px) { .app { grid-template-columns: 248px minmax(0, 1fr); } .tab-meta { display: none; } }
+@media (max-width: 1023px) { .app { grid-template-columns: 248px minmax(0, 1fr); } .tabs-row .tab-meta { display: none; } }
 
 /* ---------------------------------------------------------------- session list */
 .project { display: flex; align-items: center; gap: 8px; width: 100%; border: 0; background: none; cursor: pointer; text-align: left; padding: 14px 18px 6px; font-size: 13px; font-weight: 650; color: var(--muted); letter-spacing: .01em; }
@@ -379,6 +379,7 @@ img.shot { max-width: 100%; height: auto; border-radius: 8px; border: 1px solid 
 
 /* ---------------------------------------------------------------- clean up, remote */
 .page-head h2 { margin: 0 0 4px; font-size: 20px; font-weight: 650; display: flex; align-items: center; gap: 8px; }
+.page-sub { margin: 4px 0 0; color: var(--muted); font-size: 14px; }
 .block { margin-top: 22px; }
 table.clean { width: 100%; border-collapse: collapse; font-size: 14px; }
 table.clean td, table.clean th { text-align: left; padding: 7px 8px 7px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
@@ -613,6 +614,8 @@ function ago(ms) {
 }
 const base = (p) => (p || "").split("/").filter(Boolean).pop() || "";
 const lastLine = (t) => (t || "").trim().split("\n").filter((l) => l.trim()).pop() || "";
+/** A line of Markdown as plain text, for one-line previews. */
+const plain = (t) => String(t || "").replace(/\*\*([^*]+)\*\*/g, "$1").replace(/`([^`]+)`/g, "$1").replace(/\[([^\]]+)\]\([^)]*\)/g, "$1").replace(/(^|[\s(])[*_]([^*_\n]+)[*_](?=[\s).,!?]|$)/g, "$1$2").replace(/^[#>\-*\d.\s]+/, "");
 const agentName = (a) => (a === "codex" ? "Codex" : "Claude");
 const hunkWord = (n) => `${n} hunk${n === 1 ? "" : "s"}`;
 const plural = (n, w) => `${n} ${w}${n === 1 ? "" : "s"}`;
@@ -826,7 +829,7 @@ function snippet(e) {
   if (i.hold) return i.hold.kind === "later" && i.hold.until ? `later, until ${when(i.hold.until)}` : "done for now";
   if (i.state === "needs-answer") return (i.questions && i.questions[0] && i.questions[0].question) || i.reason || "input needed";
   if (i.state === "working") return (i.reason && i.reason !== "background command" ? i.reason : i.background && i.background[0] && i.background[0].command) || i.reason || (i.tasks && (i.tasks.find((t) => t.status === "in_progress") || {}).activeForm) || "working…";
-  return lastLine(i.awaySummary || i.lastMessage) || "(no reply yet)";
+  return plain(lastLine(i.awaySummary || i.lastMessage)) || "(no reply yet)";
 }
 
 /** The worst CI state among a session's open pull requests. */
@@ -1680,7 +1683,7 @@ async function paintActivity() {
 
 // ------------------------------------------------------------ clean up
 
-const pageHead = (title, sub) => `<div class="page-head"><h2><button class="back" data-act="back" aria-label="Back to the sessions">‹</button>${title}</h2>${sub ? `<div class="meta">${sub}</div>` : ""}</div>`;
+const pageHead = (title, sub) => `<div class="page-head"><h2><button class="icon-btn back" data-act="back" aria-label="Back to the sessions">${icon("back", 22)}</button>${title}</h2>${sub ? `<p class="page-sub">${sub}</p>` : ""}</div>`;
 
 async function paintCleanup() {
   const sub = "Idle sessions and worktrees nobody uses. Nothing is closed or removed for you: copy the commands you want.";
