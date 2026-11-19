@@ -49,7 +49,7 @@ function transcript(id: string, rows: object[]): void {
 
 const edit = (file: string, old_string: string, new_string: string) => ({ type: "assistant", message: { content: [{ type: "tool_use", id: `e-${Math.random()}`, name: "Edit", input: { file_path: join(repo, file), old_string, new_string } }] } });
 
-async function serve(extraEnv: NodeJS.ProcessEnv = {}): Promise<{ get: (path: string) => Promise<any>; post: (path: string, body: object) => Promise<any> }> {
+async function serve(extraEnv: NodeJS.ProcessEnv = {}): Promise<{ get: (path: string) => Promise<any>; post: (path: string, body: object) => Promise<any>; send?: (path: string, init: RequestInit) => Promise<Response> }> {
   child = spawn(process.execPath, [CLI, "view", "--port", "0"], { cwd: repo, env: { ...env, ...extraEnv } });
   const url = await new Promise<string>((resolve, reject) => {
     child!.stdout!.on("data", (d: Buffer) => /http:\S+/.test(String(d)) && resolve(/http:\S+/.exec(String(d))![0]));
@@ -63,7 +63,11 @@ async function serve(extraEnv: NodeJS.ProcessEnv = {}): Promise<{ get: (path: st
     if (!res.ok) throw new Error(`${res.status} ${(body as { error?: string }).error}`);
     return body;
   };
-  return { get: (path) => call(path), post: (path, body) => call(path, { method: "POST", body: JSON.stringify(body) }) };
+  return {
+    get: (path) => call(path),
+    post: (path, body) => call(path, { method: "POST", body: JSON.stringify(body) }),
+    send: (path, init) => fetch(origin + path, { ...init, headers: { ...headers, ...(init.headers as Record<string, string>) } }),
+  };
 }
 
 async function eventually<T>(check: () => Promise<T | undefined>, ms = 8000): Promise<T> {
@@ -122,6 +126,24 @@ describe("api: a session's conversation and files", () => {
     await assert.rejects(api.get("/api/files?key=claude:sa&path=.env"), /403/);
     await assert.rejects(api.get("/api/files?key=claude:sa&path=../"), /403/);
     await assert.rejects(api.get("/api/files?key=claude:nobody&path=notes.md"), /404/);
+  });
+});
+
+describe("api: files sent to a session", () => {
+  it("saves a file in the session's repository, out of git's sight", async () => {
+    transcript("sa", []);
+    running("sa", process.pid);
+    const api = await serve();
+    await api.get("/api/inbox");
+    const res = await api.send!("/api/upload?key=claude:sa", { method: "POST", body: "hello", headers: { "content-type": "application/octet-stream", "x-file-name": encodeURIComponent("メモ.txt") } });
+    assert.equal(res.status, 200);
+    const up = (await res.json()) as { path: string; rel: string };
+    assert.match(up.rel, /^\.agent-deck\/uploads\/\d{8}-\d{6}-メモ\.txt$/);
+    assert.equal(readFileSync(up.path, "utf8"), "hello");
+    assert.equal(git(repo, "status", "--porcelain"), "");
+    const big = await api.send!("/api/upload?key=claude:sa", { method: "POST", body: Buffer.alloc(26 * 1024 * 1024), headers: { "content-type": "application/octet-stream", "x-file-name": "big.bin" } });
+    assert.equal(big.status, 413);
+    assert.equal((await api.send!("/api/upload?key=claude:nobody", { method: "POST", body: "x", headers: { "x-file-name": "a" } })).status, 404);
   });
 });
 

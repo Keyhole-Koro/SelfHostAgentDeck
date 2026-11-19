@@ -15,6 +15,7 @@ import { applyHolds, hold, parseUntil, release, stateDir } from "./holds.ts";
 import { readInbox, transcriptOf, type Inbox, type InboxItem } from "./inbox.ts";
 import { prStatuses } from "./prs.ts";
 import { parsePrompt } from "./prompts.ts";
+import { MAX_UPLOAD, saveUpload } from "./uploads.ts";
 import {
   audit,
   authenticationOptions,
@@ -199,6 +200,18 @@ function viewerPage(nonce: string, mode: "local" | "remote"): string {
     .replace("/*@passkey*/", () => PASSKEY_HELPERS);
 }
 
+/** A request's bytes, up to `max`. */
+async function rawBody(req: IncomingMessage, max: number): Promise<Buffer> {
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const chunk of req) {
+    size += (chunk as Buffer).length;
+    if (size > max) throw new FileError(`Too large: up to ${Math.round(max / 1024 / 1024)} MB.`, 413);
+    chunks.push(chunk as Buffer);
+  }
+  return Buffer.concat(chunks);
+}
+
 async function body(req: IncomingMessage): Promise<Record<string, unknown>> {
   let text = "";
   for await (const chunk of req) {
@@ -281,6 +294,16 @@ export async function serve(opts: ServeOptions): Promise<Served> {
     if (!item) throw new FileError("That session is no longer listed.", 404);
     return item;
   };
+  /** Folders of the listed sessions (their repositories, or the folders themselves): where sessions may start and files may go. */
+  const projectRoots = (): Set<string> => {
+    const out = new Set<string>(opts.root ? [opts.root] : []);
+    for (const i of (last ?? currentInbox()).items) {
+      const p = placeOf(i.cwd);
+      if (p.repo) out.add(p.repo);
+      if (p.project) out.add(p.project);
+    }
+    return out;
+  };
   const offset = (url: URL, name: string): number | undefined => {
     const v = url.searchParams.get(name);
     return v && /^\d+$/.test(v) ? Number(v) : undefined;
@@ -301,7 +324,7 @@ export async function serve(opts: ServeOptions): Promise<Served> {
     const log = (action: string, target?: string, detail?: string) => {
       if (device) audit({ device: device.label, action, ...(target && { target }), ...(detail && { detail }) });
     };
-    const acting = req.method === "POST" && /^\/api\/(herdr\/(prompt|keys)|stage|start|upload|ci\/send)$/.test(url.pathname);
+    const acting = req.method === "POST" && /^\/api\/(herdr\/(prompt|keys)|stage|start|upload)$/.test(url.pathname);
     if (device && acting && !fresh) return json(res, 403, { error: "Confirm it is you with this device's passkey.", confirm: true });
     if (req.method === "GET" && url.pathname === "/api/inbox") {
       const inbox = currentInbox();
@@ -380,6 +403,22 @@ export async function serve(opts: ServeOptions): Promise<Served> {
       const img = image(root, item.cwd ?? root, path);
       res.writeHead(200, { "content-type": img.type, "cache-control": "no-store", "x-content-type-options": "nosniff", "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; sandbox" });
       return void res.end(img.data);
+    }
+    if (req.method === "POST" && url.pathname === "/api/upload") {
+      const project = url.searchParams.get("project");
+      let root: string | undefined;
+      if (project) {
+        if (!projectRoots().has(project)) throw new FileError("Not a folder of a listed session.", 404);
+        root = filesRoot(project, placeOf(project).repo);
+      } else {
+        const item = listed(url.searchParams.get("key"));
+        root = filesRoot(item.cwd, placeOf(item.cwd).repo);
+      }
+      if (!root) return json(res, 403, { error: "Files are not sent to a session that runs in your home folder." });
+      const name = decodeURIComponent(String(req.headers["x-file-name"] ?? "file"));
+      const up = saveUpload(root, name, await rawBody(req, MAX_UPLOAD));
+      log("sent a file", up.rel);
+      return json(res, 200, up);
     }
     if (req.method === "GET" && url.pathname === "/api/view") {
       // Started outside a repository and no session picked: there are no changes to show.
