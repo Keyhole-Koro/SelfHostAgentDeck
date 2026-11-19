@@ -322,6 +322,15 @@ img.shot { max-width: 100%; height: auto; border-radius: 8px; border: 1px solid 
 .more { padding: 4px 14px; color: var(--muted); font-size: 12px; }
 .legend { color: var(--muted); font-size: 12px; margin-top: 24px; display: flex; flex-wrap: wrap; gap: 4px 16px; }
 
+/* ---------------------------------------------------------------- activity */
+.feed { list-style: none; margin: 18px 0 0; padding: 0; }
+.feed .day { font-size: 11px; font-weight: 650; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); margin: 18px 0 6px; }
+.ev { display: flex; gap: 10px; align-items: baseline; padding: 5px 0; font-size: 14px; }
+.ev .t { flex: none; width: 3em; color: var(--faint); font-size: 12px; font-variant-numeric: tabular-nums; }
+.ev .mark { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--line); transform: translateY(-1px); }
+.ev.urgent .mark { background: var(--urgent); } .ev.turn .mark { background: var(--accent); } .ev.ok .mark { background: var(--ok); }
+.ev .what { min-width: 0; overflow-wrap: anywhere; }
+
 /* ---------------------------------------------------------------- clean up, remote */
 .page-head h2 { margin: 0 0 4px; font-size: 20px; font-weight: 650; display: flex; align-items: center; gap: 8px; }
 .block { margin-top: 22px; }
@@ -384,6 +393,7 @@ dialog p { margin: 0 0 14px; color: var(--muted); font-size: 14px; }
   <div class="summary" id="summary"></div>
   <div class="tools">
     <span class="limits optional" id="limits"></span>
+    <button class="tbtn" id="activity" title="What happened in every session">Activity</button>
     <button class="tbtn" id="notify" aria-pressed="false" title="Desktop notifications when a session starts waiting on you">Notify</button>
     <button class="tbtn" id="cleanup" title="Idle sessions and worktrees nobody uses">Clean up</button>
     <button class="tbtn" id="remote" title="Use this page from your phone">Remote</button>
@@ -461,8 +471,9 @@ const plural = (n, w) => `${n} ${w}${n === 1 ? "" : "s"}`;
 const kTokens = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : `${Math.round(n / 1000)}k`);
 const bytes = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)} MB` : n >= 1e3 ? `${Math.round(n / 1e3)} KB` : `${n} B`);
 const nameOf = (i) => i.title || i.name;
-/** The views that are not a session: clean-up and remote access. */
-const special = () => selected === "cleanup" || selected === "remote";
+/** The views that are not a session: the activity, clean-up and remote access. */
+const SPECIAL = ["activity", "cleanup", "remote"];
+const special = () => SPECIAL.includes(selected);
 const STATE = { "needs-answer": "Needs an answer", "your-turn": "Your turn", working: "Working", stale: "Idle" };
 const ORDER = { "needs-answer": 0, "your-turn": 1, working: 2, closed: 3, stale: 4 };
 const CONFIDENCE = {
@@ -582,6 +593,7 @@ async function loadInbox() {
   if (inbox.home && !home) await loadHome();
   notifyChanges();
   paint();
+  if (selected === "activity") void paintActivity();
   // What the selected session wrote since: cheap, only the new end of its transcript.
   if (tab === "chat" && chat.key === selected && chat.state === "ready") void loadChat("newer");
 }
@@ -756,8 +768,7 @@ function paintHeader() {
     $("limits").title = [l.primary && `5-hour window resets ${new Date(l.primary.resetsAt).toLocaleString()}`, l.secondary && `weekly window resets ${new Date(l.secondary.resetsAt).toLocaleString()}`].filter(Boolean).join("\n");
   } else $("limits").textContent = "";
   $("notify").setAttribute("aria-pressed", String(notifyOn));
-  $("cleanup").setAttribute("aria-pressed", String(selected === "cleanup"));
-  $("remote").setAttribute("aria-pressed", String(selected === "remote"));
+  for (const id of SPECIAL) $(id).setAttribute("aria-pressed", String(selected === id));
   document.title = (answer + turn ? `(${answer + turn}) ` : "") + "Agent Diff";
 }
 
@@ -1338,6 +1349,46 @@ async function planStage(repo, s) {
   }
 }
 
+// ------------------------------------------------------------ activity
+
+const KIND = {
+  "needs-answer": ["asks you", "urgent"],
+  "your-turn": ["finished its turn", "turn"],
+  started: ["started", ""],
+  ended: ["ended", ""],
+  pr: ["opened a pull request", ""],
+  "ci-failed": ["CI failed", "urgent"],
+  "ci-passed": ["CI passed", "ok"],
+  page: ["published a page", ""],
+};
+
+/** What happened in every session, newest first, by day. */
+async function paintActivity() {
+  if (!$("special").querySelector(".feed")) $("special").innerHTML = pageHead("Activity", "What happened in every session, newest first.") + `<div class="note">Looking…</div>`;
+  let r;
+  try {
+    r = await api("/api/activity");
+  } catch (e) {
+    $("special").innerHTML = pageHead("Activity") + `<div class="note error">${esc(e.message)}</div>`;
+    return;
+  }
+  if (selected !== "activity") return;
+  const live = new Set(inbox ? inbox.items.map((i) => i.key) : []);
+  let html = pageHead("Activity", "What happened in every session, newest first. Kept while the page runs, also when no one looks.");
+  if (!r.events.length) html += `<p class="note">Nothing yet: changes show up here from now on.</p>`;
+  let day = "";
+  html += `<ol class="feed">`;
+  for (const ev of r.events) {
+    const d = new Date(ev.at).toDateString();
+    if (d !== day) html += `<li class="day">${esc((day = d) === new Date().toDateString() ? "Today" : new Date(ev.at).toLocaleDateString())}</li>`;
+    const [what, tone] = KIND[ev.kind] || [ev.kind, ""];
+    const who = live.has(ev.key) ? `<button class="linkish" data-goto="${esc(ev.key)}">${esc(ev.name)}</button>` : `<b>${esc(ev.name)}</b>`;
+    const link = ev.url ? ` <a href="${esc(ev.url)}" target="_blank" rel="noopener noreferrer">${esc(ev.text || ev.url)}</a>` : ev.text ? ` <span class="sub">${esc(ev.text)}</span>` : "";
+    html += `<li class="ev ${tone}"><span class="t">${pad2(new Date(ev.at).getHours())}:${pad2(new Date(ev.at).getMinutes())}</span><span class="mark"></span><span class="what">${who} ${esc(what)}${ev.project ? ` <span class="sub">· ${esc(ev.project)}</span>` : ""}${link}</span></li>`;
+  }
+  $("special").innerHTML = html + `</ol>`;
+}
+
 // ------------------------------------------------------------ clean up
 
 const pageHead = (title, sub) => `<div class="page-head"><h2><button class="back" data-act="back" aria-label="Back to the sessions">‹</button>${title}</h2>${sub ? `<div class="meta">${sub}</div>` : ""}</div>`;
@@ -1440,12 +1491,12 @@ function select(key) {
     shown = {};
     $("changes").innerHTML = "";
   }
-  if (key === "cleanup" || key === "remote") {
+  if (SPECIAL.includes(key)) {
     saveHash();
     paintHeader();
     paintNav();
     layout();
-    void (key === "cleanup" ? paintCleanup() : paintRemote());
+    void (key === "activity" ? paintActivity() : key === "cleanup" ? paintCleanup() : paintRemote());
   } else paint();
 }
 
@@ -1777,7 +1828,7 @@ $("app").addEventListener("input", (ev) => {
   }
 });
 
-for (const id of ["cleanup", "remote"]) {
+for (const id of SPECIAL) {
   $(id).onclick = () => {
     if (selected !== id) return openSession(id);
     selected = null; // back to the sessions

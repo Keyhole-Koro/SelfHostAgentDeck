@@ -31,6 +31,7 @@ describe("page", { skip: (!chromium && "no browser") || (process.platform !== "l
   const socket = join(home, "herdr.sock");
   const kids: ChildProcess[] = [];
   let url = "";
+  let fixer = 0;
   let browser: import("playwright").Browser;
   let page: import("playwright").Page;
   const errors: string[] = [];
@@ -108,7 +109,8 @@ describe("page", { skip: (!chromium && "no browser") || (process.platform !== "l
     running("builder", proc("w1:p2"), { status: "idle" });
 
     transcript("fixer", [{ type: "ai-title", aiTitle: "Fix z" }, tool("e2", "Edit", { file_path: join(repo, "shared.ts"), old_string: "const z = 26;", new_string: "const z = 26;\nconst fixed = true;" })]);
-    running("fixer", proc("w1:p5"), { status: "busy" });
+    fixer = proc("w1:p5");
+    running("fixer", fixer, { status: "busy" });
 
     transcript("planner", [{ type: "ai-title", aiTitle: "Plan the export" }, tool("x1", "ExitPlanMode", { plan: "## Export plan\n\n1. Add a CSV writer\n2. Wire the button" })]);
     running("planner", proc("w1:p4"), { status: "waiting", waitingFor: "approve ExitPlanMode", statusUpdatedAt: Date.now() - 120_000 });
@@ -161,7 +163,7 @@ esac
 
     const server = spawn(process.execPath, [CLI, "view", "--port", "0"], {
       cwd: repo,
-      env: { ...process.env, HOME: home, CLAUDE_CONFIG_DIR: "", CODEX_HOME: "", XDG_STATE_HOME: "", AGENT_DIFF_STATE_DIR: "", AGENT_DIFF_HERDR: herdr, AGENT_DIFF_GH: gh },
+      env: { ...process.env, HOME: home, CLAUDE_CONFIG_DIR: "", CODEX_HOME: "", XDG_STATE_HOME: "", AGENT_DIFF_STATE_DIR: "", AGENT_DIFF_HERDR: herdr, AGENT_DIFF_GH: gh, AGENT_DIFF_WATCH_MS: "300" },
     });
     kids.push(server);
     url = await new Promise<string>((resolve) => server.stdout!.on("data", (d: Buffer) => /http:\S+/.test(String(d)) && resolve(/http:\S+/.exec(String(d))![0])));
@@ -209,6 +211,14 @@ esac
     await page.click('.session[data-key="claude:fixer"]');
     await page.click('#dock [data-key-press="esc"]');
     await until(() => herdrCalls().includes("agent send-keys w1:p5 esc"));
+  });
+
+  it("keeps a timeline of what happened, also while no one looks", async () => {
+    running("fixer", fixer, { status: "idle" });
+    await page.click("#activity");
+    await until(async () => /Fix z finished its turn/.test(await page.locator("#special").innerText()));
+    await page.locator('#special .feed [data-goto="claude:fixer"]').first().click();
+    await page.waitForSelector('.session[data-key="claude:fixer"][aria-current="true"]');
   });
 
   it("shows what a finished session did: recap, prompt, tasks, PR, shared file", async () => {
