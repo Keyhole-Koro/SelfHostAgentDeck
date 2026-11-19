@@ -91,6 +91,10 @@ export interface InboxItem {
   questions?: InboxQuestion[];
   /** The session's last reply. */
   lastMessage?: string;
+  /** The model of its last reply (Claude Code) or turn (Codex). */
+  model?: string;
+  /** Claude Code in plan mode: the plan it asks you to approve. */
+  plan?: string;
   /** The last reply ends with a question. */
   asks?: boolean;
   /** Your last prompt to it. */
@@ -401,12 +405,13 @@ interface ClaudeLine {
   prRepository?: string;
   compactMetadata?: { preTokens?: number };
   toolUseResult?: Record<string, unknown>;
-  message?: { content?: unknown; usage?: Record<string, number> };
+  message?: { content?: unknown; usage?: Record<string, number>; model?: string };
 }
 
 /** What a Claude transcript says so far. */
 interface ClaudeAcc {
   lastMessage?: string;
+  model?: string;
   /** Tool calls still without a result, by id. */
   pending: Map<string, Block>;
   title?: string;
@@ -622,6 +627,8 @@ function feedClaude(acc: ClaudeAcc, raw: string): void {
       }
       const u = line.message?.usage;
       if (u) acc.tokens = (u["input_tokens"] ?? 0) + (u["cache_creation_input_tokens"] ?? 0) + (u["cache_read_input_tokens"] ?? 0);
+      const model = line.message?.model;
+      if (typeof model === "string" && model && !model.startsWith("<")) acc.model = model;
       return;
     }
   }
@@ -642,6 +649,7 @@ function fromTranscript(item: InboxItem, acc: ClaudeAcc): void {
   setEdited(item, acc.edited);
   if (acc.title) item.title = acc.title;
   if (acc.lastMessage) item.lastMessage = clip(acc.lastMessage);
+  if (acc.model) item.model = acc.model;
   if (acc.lastPrompt) item.lastPrompt = acc.lastPrompt;
   if (acc.awaySummary && item.state !== "working") item.awaySummary = acc.awaySummary;
   if (acc.tasks.size) item.tasks = [...acc.tasks.values()];
@@ -656,6 +664,8 @@ function fromTranscript(item: InboxItem, acc: ClaudeAcc): void {
   if (item.state === "needs-answer") {
     const asks = [...acc.pending.values()].filter((b) => b.name === "AskUserQuestion").flatMap(questionsOf);
     if (asks.length) item.questions = asks;
+    const plan = [...acc.pending.values()].find((b) => b.name === "ExitPlanMode")?.input?.["plan"];
+    if (typeof plan === "string" && plan.trim()) item.plan = plan.length > 20_000 ? plan.slice(0, 20_000) + "\n\n…" : plan;
   }
 }
 
@@ -924,6 +934,7 @@ interface CodexAcc {
   tokens?: number;
   window?: number;
   limits?: CodexLimits;
+  model?: string;
   edited: Map<string, number>;
   publishing: Map<string, { title?: string }>;
   pages: Map<string, InboxPage>;
@@ -948,6 +959,7 @@ function feedCodex(acc: CodexAcc, raw: string): void {
   const p = e.payload ?? {};
   const at = e.timestamp ? Date.parse(e.timestamp) : NaN;
   if ((e.type === "turn_context" || e.type === "session_meta") && typeof p["cwd"] === "string") acc.cwd = p["cwd"];
+  if (e.type === "turn_context" && typeof p["model"] === "string") acc.model = p["model"];
   if (e.type === "response_item") {
     const callId = typeof p["call_id"] === "string" ? p["call_id"] : undefined;
     if (!callId) return;
@@ -1063,6 +1075,7 @@ function codexItems(home: string, now: number): { items: InboxItem[]; limits?: C
     if (acc.pages.size) entry.pages = [...acc.pages.values()].slice(-MAX_PAGES);
     if (acc.reason) entry.reason = acc.reason;
     if (acc.lastMessage) entry.lastMessage = clip(acc.lastMessage);
+    if (acc.model) entry.model = acc.model;
     if (acc.lastPrompt) entry.lastPrompt = acc.lastPrompt;
     if (acc.tokens !== undefined) {
       entry.context = { tokens: acc.tokens, compactions: 0 };

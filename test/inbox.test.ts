@@ -198,6 +198,18 @@ describe("inbox: what a Claude transcript adds", () => {
     assert.deepEqual(inbox().items[0]?.questions, [{ question: "Which one?", options: ["A", "B"] }]);
   });
 
+  it("shows the plan a waiting session asks you to approve, and the model it answers with", () => {
+    transcript("s1", [
+      { type: "assistant", message: { model: "claude-opus-5-5", content: [{ type: "text", text: "Here is my plan." }] } },
+      { type: "assistant", message: { model: "<synthetic>", content: [{ type: "text", text: "API error" }] } },
+      tool("p1", "ExitPlanMode", { plan: "## Plan\n1. Add the column" }),
+    ]);
+    running("s1", { status: "waiting", waitingFor: "approve ExitPlanMode" });
+    const item = inbox().items[0]!;
+    assert.equal(item.plan, "## Plan\n1. Add the column");
+    assert.equal(item.model, "claude-opus-5-5");
+  });
+
   it("reads only the title in light mode", () => {
     transcript("s1", [{ type: "ai-title", aiTitle: "T" }, say("hi")]);
     running("s1", { status: "waiting", waitingFor: "approve Bash: ls" });
