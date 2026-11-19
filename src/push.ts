@@ -32,6 +32,10 @@ export interface PushMessage {
   url?: string;
   /** The session to open. */
   key?: string;
+  /** Buttons on the notification (where the browser shows them): a choice of the dialog, by index. */
+  actions?: { action: string; title: string }[];
+  /** For those: which dialog it is, and the label of each choice, to answer it on the page. */
+  choose?: { sig: string; labels: Record<string, string> };
 }
 
 const b64url = (b: Buffer | Uint8Array) => Buffer.from(b).toString("base64url");

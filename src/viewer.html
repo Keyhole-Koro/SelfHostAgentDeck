@@ -1014,7 +1014,27 @@ async function initPush() {
     // no worker here (an insecure origin, a private window)
   }
 }
-if ("serviceWorker" in navigator) navigator.serviceWorker.addEventListener("message", (ev) => ev.data && ev.data.open && openSession(ev.data.open));
+if ("serviceWorker" in navigator) navigator.serviceWorker.addEventListener("message", (ev) => ev.data && ev.data.open && (ev.data.choose ? answerFromNotice(ev.data.open, ev.data.choose) : openSession(ev.data.open)));
+
+/**
+ * Yes or No tapped on a notification: opens the session and answers, as a tap on the choice would
+ * (on another device, after its passkey check). The server answers only if the dialog is the one
+ * the notification showed.
+ */
+async function answerFromNotice(key, c) {
+  openSession(key);
+  const say = (text, ok) => {
+    const show = () => (selected === key && $("answer-note") ? setNote("answer-note", text, ok) : setTimeout(show, 300));
+    show();
+  };
+  try {
+    await post("/api/herdr/choose", { key, index: Number(c.index), label: String(c.label), sig: String(c.sig) });
+    say(`Answered “${c.label}”.`, true);
+    setTimeout(() => $("screen") && selected === key && act("screen"), 700);
+  } catch (e) {
+    say(e.message, false);
+  }
+}
 
 async function togglePush() {
   try {
@@ -2896,7 +2916,15 @@ setInterval(() => {
 if (!phone.matches) document.body.dataset.view = "session";
 if (!token && mode === "local") $("main").innerHTML = '<div class="error empty">Open the full URL that agent-deck printed (it carries the access token).</div>';
 else {
-  void loadInbox();
+  // Opened by Yes or No on a notification: answer once the sessions are listed.
+  let noticed = null;
+  try {
+    noticed = params.get("choose") && selected ? JSON.parse(params.get("choose")) : null;
+  } catch {
+    // not ours
+  }
+  void loadInbox().then(() => noticed && answerFromNotice(selected, noticed));
+  saveHash(); // without the choice: a reload must not answer again
   void initPush();
 }
 </script>

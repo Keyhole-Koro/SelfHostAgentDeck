@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { parsePrompt as parse } from "../src/prompts.ts";
+import { noticeButtons, parsePrompt as parse } from "../src/prompts.ts";
 
 /** The parsed dialog, without its digest (tested on its own below). */
 const parsePrompt = (screen: string) => {
@@ -111,6 +111,17 @@ describe("choices on an agent's screen", () => {
     assert.notEqual(parse(ask("rm -rf build", 0))!.sig, parse(ask("rm -rf src", 0))!.sig);
     const numbered = (command: string) => [command, "Do you want to proceed?", "❯ 1. Yes", "  2. No"].join("\n");
     assert.notEqual(parse(numbered("npm test"))!.sig, parse(numbered("npm publish"))!.sig);
+  });
+
+  it("puts Yes and No on a permission prompt's notification, and nothing on a question's", () => {
+    const codex = parse(["Would you like to run the following command?", "", "  $ rm -rf dist", "", "› 1. Yes, proceed (y)", "  2. Yes, and don't ask again for this command (a)", "  3. No, and tell Codex what to do differently (esc)"].join("\n"))!;
+    const b = noticeButtons(codex)!;
+    assert.deepEqual(b.actions, [
+      { action: "0", title: "Yes, proceed" },
+      { action: "2", title: "No, and tell Codex what to d" },
+    ]);
+    assert.deepEqual(b.choose, { sig: codex.sig, labels: { "0": "Yes, proceed (y)", "2": "No, and tell Codex what to do differently (esc)" } });
+    assert.equal(noticeButtons(parse(["Which layout?", "❯ 1. Two panes", "  2. Three columns"].join("\n"))!), undefined);
   });
 
   it("finds no dialog in a numbered list far above, or one that does not start at 1", () => {

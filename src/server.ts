@@ -23,7 +23,7 @@ import { choose } from "./answer.ts";
 import { applyHolds, hold, parseUntil, release, stateDir } from "./holds.ts";
 import { readInbox, transcriptOf, type Inbox, type InboxItem } from "./inbox.ts";
 import { prStatuses } from "./prs.ts";
-import { parsePrompt } from "./prompts.ts";
+import { noticeButtons, parsePrompt } from "./prompts.ts";
 import { send as push, subscribe, subscribers, unsubscribe, vapid, type PushMessage, type PushSubscription, type Subscriber } from "./push.ts";
 import { MAX_UPLOAD, saveUpload } from "./uploads.ts";
 import {
@@ -409,6 +409,17 @@ export async function serve(opts: ServeOptions): Promise<Served> {
     return sent;
   };
   const pushedAt = new Map<string, number>();
+  /**
+   * Yes and No on a permission prompt's notification, read off its screen. A tap opens the page,
+   * which answers (after a passkey check on a remote device, as any action): never from the lock
+   * screen alone. Questions with options of their own are left to the page.
+   */
+  const yesNo = async (key: string): Promise<Pick<PushMessage, "actions" | "choose"> | undefined> => {
+    const pane = panes.get(key);
+    if (!pane) return undefined;
+    const p = parsePrompt(await screen(pane).catch(() => ""));
+    return p ? noticeButtons(p) : undefined;
+  };
   const onEvents = (events: ActivityEvent[]) => {
     for (const e of events) {
       if (e.held || (e.kind !== "needs-answer" && e.kind !== "your-turn" && e.kind !== "ci-failed")) continue;
@@ -416,7 +427,8 @@ export async function serve(opts: ServeOptions): Promise<Served> {
       if (Date.now() - (pushedAt.get(k) ?? 0) < 60_000) continue; // not twice a minute for the same thing
       pushedAt.set(k, Date.now());
       const title = e.kind === "needs-answer" ? `${e.name} asks you` : e.kind === "your-turn" ? `${e.name}: your turn` : `CI failed · ${e.name}`;
-      void notify({ title, body: (e.text ?? "").slice(0, 300), tag: e.key, key: e.key }, undefined, e.kind === "needs-answer" ? "high" : "normal");
+      const m: PushMessage = { title, body: (e.text ?? "").slice(0, 300), tag: e.key, key: e.key };
+      void (e.kind === "needs-answer" ? yesNo(e.key) : Promise.resolve(undefined)).then((buttons) => notify({ ...m, ...buttons }, undefined, e.kind === "needs-answer" ? "high" : "normal"));
     }
   };
   setInterval(watch, Number(env("WATCH_MS")) || 15_000).unref();

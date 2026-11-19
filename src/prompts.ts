@@ -129,3 +129,22 @@ function unnumbered(lines: Line[], at: number): ScreenPrompt | undefined {
   const sig = sigOf(lines.slice(Math.max(0, first - SIG_ABOVE), last + 1).map((l) => l.text));
   return { ...(question && { question }), choices, sig };
 }
+
+/**
+ * The buttons a notification of this dialog gets, where browsers show them (two at most): its
+ * first and last choices, when it is a permission prompt (Yes … No). A question with options of
+ * its own is answered on the page.
+ */
+export function noticeButtons(p: ScreenPrompt): { actions: { action: string; title: string }[]; choose: { sig: string; labels: Record<string, string> } } | undefined {
+  const c = p.choices;
+  const last = c.length - 1;
+  if (c.length < 2 || c.length > 3 || !/^yes\b/i.test(c[0]!.label) || !/^no\b/i.test(c[last]!.label)) return undefined;
+  const short = (l: string) => l.replace(/\s*\((?:esc|y|n|a)\)$/i, "").slice(0, 28);
+  return {
+    actions: [
+      { action: "0", title: short(c[0]!.label) },
+      { action: String(last), title: short(c[last]!.label) },
+    ],
+    choose: { sig: p.sig, labels: { "0": c[0]!.label, [String(last)]: c[last]!.label } },
+  };
+}

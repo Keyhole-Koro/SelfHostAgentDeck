@@ -523,6 +523,19 @@ esac
     assert.match(await page.locator("#chat .msg.found").innerText(), /zebra crossing/);
   });
 
+  it("answers with the choice tapped on a notification, once the page opens", async () => {
+    const t = new URL(url).hash.match(/t=([^&]+)/)![1]!;
+    const shown = await (await fetch(new URL("/api/herdr/screen?key=claude%3Aasker", url), { headers: { "x-token": t } })).json();
+    const pick = { index: 0, label: "Relevance", sig: shown.prompt.sig };
+    const before = herdrCalls().length;
+    await page.goto("about:blank");
+    await page.goto(`${url}&s=claude:asker&choose=${encodeURIComponent(JSON.stringify(pick))}`);
+    await until(() => herdrCalls().slice(before).includes("agent send-keys w1:p1 enter"));
+    await page.waitForSelector("#answer-note.ok");
+    assert.match(await page.locator("#answer-note").innerText(), /Answered “Relevance”/);
+    assert.doesNotMatch(await page.evaluate(() => location.hash), /choose/, "a reload does not answer again");
+  });
+
   it("logged no errors", () => {
     assert.deepEqual(errors, []);
   });
