@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { spawn, type ChildProcess } from "node:child_process";
-import { appendFileSync, existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { appendFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, beforeEach, describe, it } from "node:test";
-import { codexCommand, endsWithQuestion, readInbox, transcriptOf, type InboxItem } from "../src/inbox.ts";
+import { codexCommand, endsWithQuestion, readInbox, terminalApp, transcriptOf, type InboxItem } from "../src/inbox.ts";
 
 const HOUR = 36e5;
 let home: string; // stands for ~/.claude
@@ -320,10 +320,44 @@ describe("inbox: Codex", () => {
     assert.equal(by[`codex:${answered}`]?.inFlight, undefined);
   });
 
+  it("knows the process that holds a thread, and so its herdr pane", { skip: process.platform !== "linux" || !existsSync("/usr/bin/flock") }, async () => {
+    const id = "01a1e377-0000-7000-8000-000000000005";
+    thread(id, [ev({ type: "task_complete", last_agent_message: "Done." })], { hold: false });
+    const holder = spawn("flock", [join(codex, "thread-writer-locks", `${id}.lock`), "sleep", "60"], { stdio: "ignore", detached: true, env: { ...process.env, HERDR_PANE_ID: "w3:p2", HERDR_SOCKET_PATH: "/run/h.sock" } });
+    holders.push(holder);
+    await settle();
+    const item = byKey(inbox().items)[`codex:${id}`];
+    assert.equal(item?.pid, holder.pid);
+    assert.deepEqual(item?.terminal, { herdrPane: "w3:p2", herdrSocket: "/run/h.sock" });
+    assert.equal(item?.runsIn, undefined, "in herdr, the terminal app does not matter");
+  });
+
   it("reads the command out of exec's JavaScript and out of JSON arguments", () => {
     assert.equal(codexCommand("exec", 'tools.exec_command({cmd:"git status",workdir:"/w"})'), "git status");
     assert.equal(codexCommand("shell", JSON.stringify({ command: ["bash", "-lc", "npm test"] })), "bash -lc npm test");
     assert.equal(codexCommand("apply_patch", 42), "apply_patch");
+  });
+});
+
+describe("inbox: where a session runs outside herdr", () => {
+  it("names the terminal app, from the session's parent processes", { skip: process.platform !== "linux" }, async () => {
+    // A stand-in for Ptyxis's process, with a session (sleep) under it.
+    const dir = mkdtempSync(join(tmpdir(), "adv-app-"));
+    const app = join(dir, "ptyxis-agent");
+    writeFileSync(app, '#!/bin/sh\nsleep 60 &\necho $! > "$1"\nwait\n');
+    chmodSync(app, 0o755);
+    holders.push(spawn(app, [join(dir, "pid")], { stdio: "ignore", detached: true }));
+    let pid = 0;
+    for (let n = 0; n < 50 && !pid; n++) {
+      await new Promise((r) => setTimeout(r, 50));
+      pid = existsSync(join(dir, "pid")) ? Number(readFileSync(join(dir, "pid"), "utf8")) : 0;
+    }
+    assert.equal(terminalApp(pid), "Ptyxis");
+    running("outside", {}, pid);
+    const item = byKey(inbox().items)["claude:outside"];
+    assert.equal(item?.runsIn, "Ptyxis");
+    assert.equal(item?.terminal, undefined);
+    assert.equal(terminalApp(999_999_999), undefined);
   });
 });
 

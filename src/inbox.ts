@@ -121,6 +121,8 @@ export interface InboxItem {
   jobId?: string;
   /** Where the session runs, when a terminal multiplexer says so. */
   terminal?: InboxTerminal;
+  /** Outside herdr: the terminal app it runs in ("Ptyxis", "tmux", "VS Code"), when known. */
+  runsIn?: string;
   /** How to get back to the session. */
   resume: string;
   /** Put off with "Later" or "Done" (see holds.ts) until the session moves on. */
@@ -332,6 +334,62 @@ export function terminalOf(pid: number): InboxTerminal | undefined {
     return herdrPane && herdrSocket ? { herdrPane, herdrSocket } : undefined;
   } catch {
     return undefined;
+  }
+}
+
+/** Terminal apps, by the name of their process (/proc/<pid>/comm keeps 15 characters). */
+const TERMINAL_APPS: [RegExp, string][] = [
+  [/^ptyxis/, "Ptyxis"],
+  [/^gnome-terminal/, "GNOME Terminal"],
+  [/^kgx$/, "Console"],
+  [/^konsole$/, "Konsole"],
+  [/^kitty$/, "kitty"],
+  [/^wezterm/, "WezTerm"],
+  [/^alacritty$/i, "Alacritty"],
+  [/^ghostty$/, "Ghostty"],
+  [/^foot(client)?$/, "foot"],
+  [/^xterm$/, "xterm"],
+  [/^tilix$/, "Tilix"],
+  [/^terminator$/, "Terminator"],
+  [/^tmux/, "tmux"],
+  [/^zellij$/, "Zellij"],
+  [/^screen$/i, "screen"],
+  [/^code(-oss)?$/, "VS Code"],
+  [/^cursor$/, "Cursor"],
+  [/^sshd/, "an SSH login"],
+];
+const apps = new Map<number, string | undefined>();
+
+/** The terminal app a process runs in, from the names of its parents (Linux only). */
+export function terminalApp(pid: number): string | undefined {
+  if (apps.has(pid)) return apps.get(pid);
+  let app: string | undefined;
+  for (let p = pid, n = 0; p > 1 && n < 16; n++) {
+    let stat: string;
+    try {
+      stat = readFileSync(`/proc/${p}/stat`, "utf8");
+    } catch {
+      break;
+    }
+    const comm = stat.slice(stat.indexOf("(") + 1, stat.lastIndexOf(")"));
+    app = p === pid ? undefined : TERMINAL_APPS.find(([re]) => re.test(comm))?.[1];
+    if (app) break;
+    p = Number(stat.slice(stat.lastIndexOf(")") + 2).split(" ")[1]);
+  }
+  apps.set(pid, app);
+  if (apps.size > 500) apps.delete(apps.keys().next().value!);
+  return app;
+}
+
+/** Where a running session's process is: its herdr pane, or else the terminal app it runs in. */
+function placeProcess(item: InboxItem, pid: number): void {
+  const memory = memoryOf(pid);
+  if (memory) item.memory = memory;
+  const terminal = terminalOf(pid);
+  if (terminal) item.terminal = terminal;
+  else {
+    const app = terminalApp(pid);
+    if (app) item.runsIn = app;
   }
 }
 
@@ -743,10 +801,7 @@ function claudeItems(home: string, now: number, staleAfter: number, light: boole
       if (job.state === "blocked" && job.needs) item.reason = item.reason ? `${item.reason} · ${job.needs}` : job.needs;
     }
     if (transcript) setTranscript(item, transcript);
-    const memory = memoryOf(pid);
-    if (memory) item.memory = memory;
-    const terminal = terminalOf(pid);
-    if (terminal) item.terminal = terminal;
+    placeProcess(item, pid);
     if (!light && transcript) {
       const acc = follow(claudeCursors, transcript, newClaudeAcc, feedClaude);
       if (acc) fromTranscript(item, acc);
@@ -829,18 +884,22 @@ export function runningSessions(claude = claudeHome(), codex = codexHome()): Map
 // ---------------------------------------------------------------- Codex
 
 /** Inode numbers of files someone holds a lock on (Linux); undefined where /proc/locks is absent. */
-function lockedInodes(): Set<number> | undefined {
+/** Inodes of the files locked now, and the process holding each lock. */
+function lockedInodes(): Map<number, number> | undefined {
   let text: string;
   try {
     text = readFileSync("/proc/locks", "utf8");
   } catch {
     return undefined;
   }
-  const out = new Set<number>();
+  const out = new Map<number, number>();
   for (const line of text.split("\n")) {
-    // "1: FLOCK  ADVISORY  WRITE 13101 103:03:9978369 0 EOF" (blocked waiters start with "->")
-    const dev = line.split(/\s+/).find((f) => /^[0-9a-f]+:[0-9a-f]+:\d+$/.test(f));
-    if (dev) out.add(Number(dev.split(":")[2]));
+    // "1: FLOCK  ADVISORY  WRITE 13101 103:03:9978369 0 EOF"; processes waiting for it follow, with "->"
+    const fields = line.trim().split(/\s+/);
+    const at = fields.findIndex((f) => /^[0-9a-f]+:[0-9a-f]+:\d+$/.test(f));
+    if (at < 1) continue;
+    const ino = Number(fields[at]!.split(":")[2]);
+    if (!out.has(ino)) out.set(ino, line.includes("->") ? 0 : Number(fields[at - 1]));
   }
   return out;
 }
@@ -1035,10 +1094,14 @@ function codexItems(home: string, now: number): { items: InboxItem[]; limits?: C
     return { items: [] };
   }
   const held = lockedInodes();
+  const pids = new Map<string, number>();
   const ids = locks
     .filter((f) => {
       try {
-        return !held || held.has(statSync(join(lockDir, f)).ino);
+        if (!held) return true;
+        const pid = held.get(statSync(join(lockDir, f)).ino);
+        if (pid) pids.set(f.slice(0, -".lock".length), pid);
+        return pid !== undefined;
       } catch {
         return false;
       }
@@ -1069,6 +1132,11 @@ function codexItems(home: string, now: number): { items: InboxItem[]; limits?: C
       since: acc.since,
       resume: `codex resume ${id}`,
     };
+    const pid = pids.get(id);
+    if (pid) {
+      entry.pid = pid;
+      placeProcess(entry, pid);
+    }
     if (names.has(id)) entry.title = names.get(id)!;
     setEdited(entry, acc.edited);
     setTranscript(entry, file);
