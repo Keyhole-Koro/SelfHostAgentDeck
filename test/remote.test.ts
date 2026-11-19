@@ -139,7 +139,7 @@ async function signIn(passkey: Awaited<ReturnType<typeof softPasskey>>): Promise
 before(async () => {
   home = mkdtempSync(join(tmpdir(), "adv-remote-"));
   state = join(home, "state");
-  env = { ...process.env, HOME: home, CLAUDE_CONFIG_DIR: "", CODEX_HOME: "", XDG_STATE_HOME: "", AGENT_DIFF_STATE_DIR: state };
+  env = { ...process.env, HOME: home, CLAUDE_CONFIG_DIR: "", CODEX_HOME: "", XDG_STATE_HOME: "", AGENT_DIFF_STATE_DIR: state, AGENT_DIFF_PUSH_INSECURE: "1" };
   const sessions = join(home, ".claude", "sessions");
   mkdirSync(sessions, { recursive: true });
   writeFileSync(join(sessions, `${process.pid}.json`), JSON.stringify({ pid: process.pid, sessionId: "s1", cwd: home, name: "builder", status: "idle", statusUpdatedAt: Date.now() }));
@@ -161,7 +161,9 @@ describe("remote: pairing and signing in", () => {
     passkey ??= await softPasskey();
   });
 
-  it("sends a device without a session to the sign-in page", async () => {
+  it("sends a device without a session to the sign-in page, which can be added to a home screen", async () => {
+    assert.equal((await call("GET", "/manifest.webmanifest")).status, 200);
+    assert.equal((await call("GET", "/icon-180.png")).status, 200);
     const r = await call("GET", "/");
     assert.equal(r.status, 302);
     assert.equal(r.headers["location"], "/login");
@@ -208,6 +210,21 @@ describe("remote: pairing and signing in", () => {
     assert.equal(now.status, 400, "past the check, it fails on herdr (off here) instead");
     assert.match(now.json.error, /herdr pane/);
     assert.equal((await call("POST", "/auth/confirm/options", { headers: page() })).status, 401, "no check without a session");
+  });
+
+  it("tells the other devices, by a push, when one is added", async () => {
+    const { browser, decrypt, pushService } = await import("./push-browser.ts");
+    const service = await pushService();
+    const b = browser();
+    const on = await call("POST", "/api/push/subscribe", { body: { subscription: { endpoint: `${service.url}/push/a`, keys: b.keys } }, cookie: session, headers: page() });
+    assert.equal(on.status, 200, on.body);
+    const other = await softPasskey();
+    await pairDevice(other, "Tablet");
+    for (let n = 0; n < 50 && !service.got.length; n++) await new Promise((r) => setTimeout(r, 100));
+    assert.deepEqual(JSON.parse(decrypt(service.got[0]!.body, b.ua, b.auth)).title, "A device was added");
+    assert.match(JSON.parse(decrypt(service.got[0]!.body, b.ua, b.auth)).body, /^Tablet can now see/);
+    service.close();
+    assert.match(cli("remote", "revoke", other.id.slice(0, 6)), /Removed Tablet/);
   });
 
   it("logs what a device does, and stops its sessions when it is removed", async () => {

@@ -423,6 +423,9 @@ function page(nonce: string, title: string, body: string): string {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="apple-touch-icon" href="/icon-180.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
 <title>${esc(title)}</title>
 <style>
 :root { --bg: #fbfaf8; --panel: #fff; --text: #1f1d1a; --muted: #6f6a62; --line: #e6e2db; --accent: #3b5bdb; --urgent: #b42318; color-scheme: light; }

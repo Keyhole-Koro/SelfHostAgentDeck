@@ -11,12 +11,14 @@ import { findConflicts } from "./conflicts.ts";
 import { readChat } from "./conversation.ts";
 import { parseSince } from "./core.ts";
 import { FileError, filesRoot, image, look } from "./files.ts";
+import { icon } from "./icon.ts";
 import { repoInfo } from "./git.ts";
 import { focus, herdrAgents, matchPanes, prompt, screen, sendKeys, type HerdrAgent } from "./herdr.ts";
 import { applyHolds, hold, parseUntil, release, stateDir } from "./holds.ts";
 import { readInbox, transcriptOf, type Inbox, type InboxItem } from "./inbox.ts";
 import { prStatuses } from "./prs.ts";
 import { parsePrompt } from "./prompts.ts";
+import { send as push, subscribe, subscribers, unsubscribe, vapid, type PushMessage, type PushSubscription, type Subscriber } from "./push.ts";
 import { MAX_UPLOAD, saveUpload } from "./uploads.ts";
 import {
   audit,
@@ -82,6 +84,42 @@ export interface Served {
 const PAGE = join(import.meta.dirname, "viewer.html");
 /** The page's Markdown renderer, inlined into its script (one nonce, one request). */
 const MARKDOWN = join(import.meta.dirname, "markdown.js");
+const WORKER = join(import.meta.dirname, "sw.js");
+
+/** What makes the page an app on a home screen: its manifest, icons, and the worker that shows notifications. */
+const MANIFEST = {
+  name: "Agent Deck",
+  short_name: "Agent Deck",
+  description: "Your coding agents: what they ask, what they did, and your answers.",
+  start_url: "/",
+  scope: "/",
+  display: "standalone",
+  background_color: "#1b1a18",
+  theme_color: "#1b1a18",
+  icons: [
+    { src: "/icon-192.png", sizes: "192x192", type: "image/png" },
+    { src: "/icon-512.png", sizes: "512x512", type: "image/png" },
+    { src: "/icon-maskable.png", sizes: "512x512", type: "image/png", purpose: "maskable" },
+  ],
+};
+
+function appAsset(path: string): { type: string; body: string | Buffer } | undefined {
+  switch (path) {
+    case "/manifest.webmanifest":
+      return { type: "application/manifest+json", body: JSON.stringify(MANIFEST) };
+    case "/sw.js":
+      return { type: "text/javascript; charset=utf-8", body: readFileSync(WORKER, "utf8") };
+    case "/icon-180.png":
+      return { type: "image/png", body: icon(180) };
+    case "/icon-192.png":
+      return { type: "image/png", body: icon(192) };
+    case "/icon-512.png":
+      return { type: "image/png", body: icon(512) };
+    case "/icon-maskable.png":
+      return { type: "image/png", body: icon(512, true) };
+  }
+  return undefined;
+}
 
 interface Place {
   /** The working tree's root; null outside a repository. */
@@ -173,7 +211,7 @@ function rangeOf(url: URL): { base?: string; since?: number } {
   return { base, since: since ? parseSince(since) : undefined };
 }
 
-function send(res: ServerResponse, status: number, type: string, body: string): void {
+function send(res: ServerResponse, status: number, type: string, body: string | Buffer): void {
   res.writeHead(status, { "content-type": type, "cache-control": "no-store", "x-content-type-options": "nosniff" });
   res.end(body);
 }
@@ -186,7 +224,7 @@ function json(res: ServerResponse, status: number, value: unknown): void {
 function html(res: ServerResponse, body: string, nonce: string): void {
   res.setHeader(
     "content-security-policy",
-    `default-src 'none'; script-src 'nonce-${nonce}'; style-src 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'`,
+    `default-src 'none'; script-src 'nonce-${nonce}'; style-src 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; manifest-src 'self'; worker-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'`,
   );
   res.setHeader("x-frame-options", "DENY");
   res.setHeader("referrer-policy", "no-referrer");
@@ -309,7 +347,32 @@ export async function serve(opts: ServeOptions): Promise<Served> {
       // try again next time
     }
   };
-  const onEvents = (_events: ActivityEvent[]) => {};
+  /** Pushes a message to the devices that asked for notifications (or to those `to` picks). */
+  const pushSubject = opts.remote?.origin ?? "mailto:agent-deck@localhost";
+  const notify = async (m: PushMessage, to: (s: Subscriber) => boolean = () => true, urgency: "high" | "normal" = "normal"): Promise<number> => {
+    let sent = 0;
+    for (const s of subscribers().filter(to)) {
+      const open = m.key ? `s=${encodeURIComponent(m.key)}` : "";
+      const url = s.device === "local" ? `/#t=${token}${open ? `&${open}` : ""}` : `/${open ? `#${open}` : ""}`;
+      try {
+        if ((await push(s, { ...m, url }, { subject: pushSubject, urgency })) < 300) sent++;
+      } catch {
+        // the push service is out of reach now
+      }
+    }
+    return sent;
+  };
+  const pushedAt = new Map<string, number>();
+  const onEvents = (events: ActivityEvent[]) => {
+    for (const e of events) {
+      if (e.held || (e.kind !== "needs-answer" && e.kind !== "your-turn" && e.kind !== "ci-failed")) continue;
+      const k = `${e.key}|${e.kind}`;
+      if (Date.now() - (pushedAt.get(k) ?? 0) < 60_000) continue; // not twice a minute for the same thing
+      pushedAt.set(k, Date.now());
+      const title = e.kind === "needs-answer" ? `${e.name} asks you` : e.kind === "your-turn" ? `${e.name}: your turn` : `CI failed · ${e.name}`;
+      void notify({ title, body: (e.text ?? "").slice(0, 300), tag: e.key, key: e.key }, undefined, e.kind === "needs-answer" ? "high" : "normal");
+    }
+  };
   setInterval(watch, Number(process.env["AGENT_DIFF_WATCH_MS"]) || 15_000).unref();
   setTimeout(watch, 1000).unref();
 
@@ -362,6 +425,20 @@ export async function serve(opts: ServeOptions): Promise<Served> {
       return json(res, 200, { ...inbox, items, prStatus, home, homeProject: home ? placeOf(home).project : null });
     }
     if (req.method === "GET" && url.pathname === "/api/activity") return json(res, 200, { events: readActivity(300) });
+    if (url.pathname.startsWith("/api/push")) {
+      const who = device?.id ?? "local";
+      if (req.method === "GET" && url.pathname === "/api/push") return json(res, 200, { key: vapid().publicKey, endpoints: subscribers().filter((s) => s.device === who).map((s) => s.endpoint) });
+      if (req.method !== "POST") return json(res, 404, { error: "Not found" });
+      const b = await body(req);
+      if (url.pathname === "/api/push/subscribe") {
+        subscribe(b["subscription"] as PushSubscription, who, device?.label ?? "This computer");
+        log("turned notifications on");
+        return json(res, 200, { ok: true });
+      }
+      if (url.pathname === "/api/push/unsubscribe") return json(res, 200, { removed: unsubscribe((s) => s.device === who && s.endpoint === b["endpoint"]) });
+      if (url.pathname === "/api/push/test") return json(res, 200, { sent: await notify({ title: "Agent Deck", body: "Notifications work on this device." }, (s) => s.device === who) });
+      return json(res, 404, { error: "Not found" });
+    }
     if (req.method === "GET" && url.pathname === "/api/cleanup") {
       const inbox = last ?? currentInbox();
       const projects = new Set<string>();
@@ -479,6 +556,7 @@ export async function serve(opts: ServeOptions): Promise<Served> {
       const b = await body(req);
       const gone = removePasskey(String(b["id"] ?? ""));
       if (!gone) return json(res, 404, { error: "No such device." });
+      unsubscribe((s) => s.device === gone.id);
       log("remove device", gone.label);
       return json(res, 200, { removed: gone.label });
     }
@@ -495,6 +573,8 @@ export async function serve(opts: ServeOptions): Promise<Served> {
         const nonce = randomBytes(16).toString("base64");
         return html(res, viewerPage(nonce, "local"), nonce);
       }
+      const asset = req.method === "GET" ? appAsset(url.pathname) : undefined;
+      if (asset) return send(res, 200, asset.type, asset.body);
       if (req.headers["x-token"] !== token) return json(res, 403, { error: "Open the URL agent-diff view printed (it carries the access token)." });
       return await api(req, res, url);
     } catch (e) {
@@ -517,6 +597,8 @@ export async function serve(opts: ServeOptions): Promise<Served> {
       // which a form or another site's script cannot send without CORS (never granted here).
       const fromPage = req.headers["x-agent-diff"] === "1" && (req.method === "GET" || req.headers.origin === cfg.origin);
 
+      const asset = req.method === "GET" ? appAsset(url.pathname) : undefined;
+      if (asset) return send(res, 200, asset.type, asset.body);
       if (req.method === "GET" && url.pathname === "/login") return html(res, loginPage(nonce), nonce);
       const pair = /^\/pair\/([A-Za-z0-9_-]{20,})$/.exec(url.pathname);
       if (req.method === "GET" && pair) return html(res, pairPage(nonce, pair[1]!, passkeyLabel(req.headers["user-agent"])), nonce);
@@ -543,8 +625,11 @@ export async function serve(opts: ServeOptions): Promise<Served> {
             res.setHeader("set-cookie", cookie(cfg, names.ceremony, o.ceremony, 300));
             return json(res, 200, o.options);
           }
-          case "/auth/register/verify":
-            return signIn(await verifyRegistration(cfg, ceremony, b["response"] as never), "paired this device");
+          case "/auth/register/verify": {
+            const p = await verifyRegistration(cfg, ceremony, b["response"] as never);
+            void notify({ title: "A device was added", body: `${p.label} can now see and answer your sessions. Not you? Remove it under Remote.` }, (s) => s.device !== p.id, "high");
+            return signIn(p, "paired this device");
+          }
           case "/auth/confirm/options": {
             if (!device) return json(res, 401, { error: "Sign in again.", login: "/login" });
             const o = await confirmOptions(cfg, device);

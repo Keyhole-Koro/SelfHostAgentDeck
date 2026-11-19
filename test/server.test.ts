@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { summarize } from "../src/prs.ts";
+import { browser, decrypt, pushService } from "./push-browser.ts";
 
 /** The page's API, served by `agent-diff view` over a made-up home and repository. */
 
@@ -126,6 +127,40 @@ describe("api: a session's conversation and files", () => {
     await assert.rejects(api.get("/api/files?key=claude:sa&path=.env"), /403/);
     await assert.rejects(api.get("/api/files?key=claude:sa&path=../"), /403/);
     await assert.rejects(api.get("/api/files?key=claude:nobody&path=notes.md"), /404/);
+  });
+});
+
+describe("api: an app with notifications", () => {
+  it("serves the manifest, the worker and the icons without the token", async () => {
+    const api = await serve();
+    const manifest = await api.send!("/manifest.webmanifest", { headers: { "x-token": "" } });
+    assert.equal(manifest.status, 200);
+    assert.equal(((await manifest.json()) as { name: string }).name, "Agent Deck");
+    assert.match(await (await api.send!("/sw.js", { headers: { "x-token": "" } })).text(), /showNotification/);
+    const icon = Buffer.from(await (await api.send!("/icon-192.png", { headers: { "x-token": "" } })).arrayBuffer());
+    assert.equal(icon.subarray(1, 4).toString(), "PNG");
+    assert.equal(icon.readUInt32BE(16), 192);
+  });
+
+  it("pushes to the browsers that asked, encrypted for them, when a session starts waiting", async () => {
+    const service = await pushService();
+    transcript("sa", []);
+    running("sa", process.pid, { status: "busy" });
+    const api = await serve({ AGENT_DIFF_WATCH_MS: "200", AGENT_DIFF_PUSH_INSECURE: "1" });
+    const b = browser();
+    await api.post("/api/push/subscribe", { subscription: { endpoint: `${service.url}/push/1`, keys: b.keys } });
+    assert.equal((await api.get("/api/push")).endpoints.length, 1);
+    await new Promise((r) => setTimeout(r, 1500)); // the first look: the baseline
+    running("sa", process.pid, { status: "waiting", waitingFor: "approve Bash: npm test" });
+    const msg = await eventually(async () => service.got[0]);
+    const m = JSON.parse(decrypt(msg.body, b.ua, b.auth));
+    assert.equal(m.title, "name-sa asks you");
+    assert.equal(m.body, "approve Bash: npm test");
+    assert.match(m.url, /^\/#t=[0-9a-f]{32}&s=claude%3Asa$/, "the local page opens with its token, on the session");
+    assert.equal(msg.headers["urgency"], "high");
+    await api.post("/api/push/unsubscribe", { endpoint: `${service.url}/push/1` });
+    assert.equal((await api.get("/api/push")).endpoints.length, 0);
+    service.close();
   });
 });
 
