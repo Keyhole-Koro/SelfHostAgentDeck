@@ -211,6 +211,10 @@ describe("remote: pairing and signing in", () => {
     assert.equal(shell.json.confirm, true);
     const machines = await call("POST", "/api/machines", { body: { others: [{ name: "Fake", url: "https://phish.example.com" }] }, cookie: only, headers: page() });
     assert.equal(machines.status, 403, "nor can it change where the computer links point");
+    const subscription = { endpoint: "https://push.example.com/stolen", keys: { p256dh: "x", auth: "y" } };
+    const notifications = await call("POST", "/api/push/subscribe", { body: { subscription }, cookie: only, headers: page() });
+    assert.equal(notifications.status, 403, "nor have the notifications, with what they quote, sent somewhere else");
+    assert.equal(notifications.json.confirm, true);
     assert.equal((await call("POST", "/api/hold", { body: { key: "claude:s1", kind: "later", until: "1h" }, cookie: only, headers: page() })).status, 200, "putting off is not acting");
     const asked = await call("POST", "/auth/confirm/options", { cookie: only, headers: page() });
     assert.deepEqual(asked.json.allowCredentials.map((c: { id: string }) => c.id), [passkey.id], "only this device's passkey");

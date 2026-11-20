@@ -477,14 +477,14 @@ export async function serve(opts: ServeOptions): Promise<Served> {
 
   /**
    * The API, for the local page and for signed-in devices (`device` set: remote, and logged). A
-   * device acts (prompts, keys, staging, starting, uploading, shell commands, the computer list, removing a device) only within a
-   * few minutes of a passkey check: a stolen cookie alone can look, not act.
+   * device acts (prompts, keys, staging, starting, uploading, shell commands, the computer list, removing a device, turning
+   * notifications on) only within a few minutes of a passkey check: a stolen cookie alone can look, not act.
    */
   const api = async (req: IncomingMessage, res: ServerResponse, url: URL, device?: Passkey, fresh = false): Promise<void> => {
     const log = (action: string, target?: string, detail?: string) => {
       if (device) audit({ device: device.label, action, ...(target && { target }), ...(detail && { detail }) });
     };
-    const acting = req.method === "POST" && /^\/api\/(herdr\/(prompt|keys|choose)|stage|start|upload|move|command|machines|remote\/revoke)$/.test(url.pathname);
+    const acting = req.method === "POST" && /^\/api\/(herdr\/(prompt|keys|choose)|stage|start|upload|move|command|machines|remote\/revoke|push\/subscribe)$/.test(url.pathname);
     if (device && acting && !fresh) return json(res, 403, { error: "Confirm it is you with this device's passkey.", confirm: true });
     if (req.method === "GET" && url.pathname === "/api/inbox") {
       const inbox = currentInbox();
