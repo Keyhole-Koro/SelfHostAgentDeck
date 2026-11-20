@@ -446,6 +446,21 @@ esac
     await page.click('[data-tab="chat"]');
   });
 
+  it("names this computer and links to your others", async () => {
+    await page.click("#machines > summary");
+    await page.click("#machine-edit");
+    await page.fill("#machine-self", "Desk");
+    await page.fill('#machine-rows [name="name"]', "Laptop");
+    await page.fill('#machine-rows [name="url"]', "laptop.example.com");
+    await page.click("#machine-save");
+    await page.waitForSelector("#machines-dialog:not([open])", { state: "attached" });
+    assert.equal(await page.locator("#machine-name").innerText(), "Desk");
+    await page.click("#machines > summary");
+    assert.equal(await page.locator("#machine-list a.machine").getAttribute("href"), "https://laptop.example.com/");
+    assert.match(await page.title(), /Agent Deck · Desk$/);
+    await page.click("#machines > summary");
+  });
+
   it("fits a phone: the list, then one session with its reply box, and Back", async () => {
     // Picked already (from the URL), so its reply box is first drawn while the list hides it.
     const phone = await another({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true }, "&s=claude:chatty");
