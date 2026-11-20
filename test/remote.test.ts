@@ -274,7 +274,10 @@ describe("remote: closed doors", () => {
     assert.equal((await call("POST", "/api/hold", { body: { key: "claude:s1", kind: "done" }, cookie: session, headers: { origin: "https://evil.example", "x-agent-deck": "1" } })).status, 403);
     assert.equal((await call("POST", "/auth/login/options", { headers: { origin: "https://evil.example", "x-agent-deck": "1" } })).status, 403);
     const own = session.split("; ").find((c) => c.startsWith("agent_deck_session="))!;
-    assert.equal((await call("GET", "/api/inbox", { cookie: own.replace(/.$/, (c) => (c === "A" ? "B" : "A")), headers: page() })).status, 401, "a tampered cookie");
+    // A character well inside the signature: the last one of base64 may carry only padding bits.
+    const at = own.length - 6;
+    const tampered = own.slice(0, at) + (own[at] === "A" ? "B" : "A") + own.slice(at + 1);
+    assert.equal((await call("GET", "/api/inbox", { cookie: tampered, headers: page() })).status, 401, "a tampered cookie");
     const stranger = await softPasskey();
     const options = await call("POST", "/auth/login/options", { headers: page() });
     const r = await call("POST", "/auth/login/verify", { body: { response: await stranger.authenticate(options.json, origin) }, cookie: jar(options.cookies), headers: page() });
