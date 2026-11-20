@@ -85,6 +85,22 @@ code, pre { font-family: var(--mono); }
 /* ---------------------------------------------------------------- app bar */
 header#top { flex: none; min-height: 52px; padding: 8px 20px; display: flex; flex-wrap: wrap; gap: 6px 16px; align-items: center; border-bottom: 1px solid var(--line); background: var(--side); }
 header#top h1 { margin: 0; font-size: 16px; font-weight: 650; letter-spacing: -.01em; white-space: nowrap; }
+/* Which computer this page is on, and the others to switch to. */
+header#top h1 + .menu { margin-left: -10px; }
+.machine-btn { display: inline-flex; align-items: center; gap: 3px; max-width: 160px; padding: 3px 6px 3px 8px; border-radius: 7px; color: var(--muted); font-size: 13px; cursor: pointer; white-space: nowrap; }
+.machine-btn span { overflow: hidden; text-overflow: ellipsis; }
+.machine-btn:hover, #machines[open] > .machine-btn { background: var(--hover); color: var(--text); }
+.menu-list.left { left: 0; right: auto; }
+.menu-list a.machine { display: flex; flex-direction: column; padding: 7px 10px; border-radius: 8px; color: var(--text); text-decoration: none; font-size: 14px; }
+.menu-list a.machine:hover { background: var(--hover); }
+.menu-list a.machine .sub { font-size: 12px; color: var(--faint); max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.menu-list .here { padding: 7px 10px; font-size: 14px; display: flex; flex-direction: column; }
+.menu-list .here .sub { font-size: 12px; color: var(--faint); }
+.machine-rows { display: grid; gap: 8px; margin-bottom: 8px; }
+.machine-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr) auto; gap: 6px; align-items: center; }
+#machines-dialog { width: min(92vw, 520px); }
+.machine-self label { display: grid; gap: 4px; font-size: 13px; color: var(--muted); margin-bottom: 12px; }
+.machine-label { font-size: 13px; color: var(--muted); margin-bottom: 4px; }
 .summary { color: var(--muted); font-size: 13px; display: flex; flex-wrap: wrap; gap: 4px 12px; }
 .summary b { color: var(--text); font-weight: 650; }
 .summary .urgent b { color: var(--urgent); }
@@ -599,6 +615,7 @@ systemDark.addEventListener("change", applyTheme);
 <body data-view="list" data-layout="focus">
 <header id="top">
   <h1>Agent Deck</h1>
+  <details class="menu" id="machines"><summary class="machine-btn" title="This computer: switch to another" aria-label="Computers"><span id="machine-name"></span><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></summary><div class="menu-list left" id="machine-list"></div></details>
   <div class="summary" id="summary"></div>
   <div class="tools">
     <span class="limits optional" id="limits"></span>
@@ -644,6 +661,16 @@ systemDark.addEventListener("change", applyTheme);
   <aside id="side" aria-label="About this session"><div id="info"></div></aside>
 </div>
 <div class="layout-root" id="layout-root"></div>
+<dialog id="machines-dialog" aria-labelledby="machines-title">
+  <h2 id="machines-title">Your other computers</h2>
+  <p>Each runs Agent Deck of its own; this page only links to theirs, and you sign in to each with its own passkey. Every device you use here sees this list.</p>
+  <form class="form machine-self"><label>This computer<input id="machine-self" placeholder="Its name" autocomplete="off"></label></form>
+  <div class="machine-label">Others</div>
+  <form class="form machine-rows" id="machine-rows"></form>
+  <button class="linkish" id="machine-add">Add a computer</button>
+  <div class="actions"><button class="btn primary" id="machine-save">Save</button><button class="btn" id="machine-cancel">Cancel</button></div>
+  <p class="note error" id="machine-error"></p>
+</dialog>
 <dialog id="confirm" aria-labelledby="confirm-title">
   <h2 id="confirm-title">Is it you?</h2>
   <p>From another device, sending to a session needs this device's passkey every few minutes.</p>
@@ -690,6 +717,7 @@ let inbox = null; // running sessions, in every repository
 let prev = null; // the inbox before, to notice sessions that start waiting
 let home = null; // changes in the repository the page was started in (sessions that ended, unattributed)
 let shown = {}; // what each part shows, to repaint only on change
+let machines = { self: "", others: [] }; // this computer's name, and your other computers' pages
 const views = new Map(); // `${repo}|${range}` → { at, view }
 const screens = new Map(); // session → its herdr screen, once asked for
 const drafts = new Map(); // session → the prompt being written
@@ -710,6 +738,7 @@ const $ = (id) => document.getElementById(id);
 /** Line icons, drawn for this page (24 × 24, stroked with the text colour). */
 const ICONS = {
   plus: '<path d="M12 5v14M5 12h14"/>',
+  x: '<path d="M6 6l12 12M18 6L6 18"/>',
   search: '<circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.3-4.3"/>',
   activity: '<circle cx="5" cy="6" r="1.3"/><circle cx="5" cy="12" r="1.3"/><circle cx="5" cy="18" r="1.3"/><path d="M9.5 6H20M9.5 12H20M9.5 18H16"/>',
   bell: '<path d="M6.5 16v-5a5.5 5.5 0 0 1 11 0v5l1.5 2h-14z"/><path d="M10 21h4"/>',
@@ -1089,7 +1118,8 @@ function paintHeader() {
   } else $("limits").textContent = "";
   $("notify").setAttribute("aria-pressed", String(pushOn || notifyOn));
   for (const id of SPECIAL) $(id).setAttribute("aria-pressed", String(selected === id));
-  document.title = (answer + turn ? `(${answer + turn}) ` : "") + "Agent Deck";
+  // With other computers, which one a tab shows.
+  document.title = (answer + turn ? `(${answer + turn}) ` : "") + "Agent Deck" + (machines.others.length && machines.self ? ` · ${machines.self}` : "");
 }
 
 // ------------------------------------------------------------ notifications
@@ -2990,6 +3020,70 @@ $("pane-shell").addEventListener("click", (ev) => {
   }
 });
 
+// ------------------------------------------------------------ other computers
+
+async function loadMachines() {
+  try {
+    machines = await api("/api/machines");
+  } catch {
+    return;
+  }
+  paintMachines();
+}
+
+function paintMachines() {
+  $("machine-name").textContent = machines.self;
+  const host = (u) => {
+    try {
+      return new URL(u).host;
+    } catch {
+      return u;
+    }
+  };
+  $("machine-list").innerHTML =
+    `<div class="here"><span>${esc(machines.self)}</span><span class="sub">This computer</span></div>` +
+    machines.others.map((m) => `<a class="machine" href="${esc(m.url)}"><span>${esc(m.name)}</span><span class="sub">${esc(host(m.url))}</span></a>`).join("") +
+    `<button id="machine-edit">${icon("plus")}${machines.others.length ? "Add or change computers" : "Add another computer"}</button>`;
+  paintHeader();
+}
+
+function machineRow(m = { name: "", url: "" }) {
+  return `<div class="machine-row"><input name="name" placeholder="Name" value="${esc(m.name)}" aria-label="Name" autocomplete="off"><input name="url" type="url" placeholder="https://agents.example.com" value="${esc(m.url)}" aria-label="Its Agent Deck page" autocomplete="off" autocapitalize="off" spellcheck="false"><button type="button" class="icon-btn" data-remove-machine title="Remove" aria-label="Remove">${icon("x", 16)}</button></div>`;
+}
+
+$("machine-list").addEventListener("click", (ev) => {
+  if (!ev.target.closest("#machine-edit")) return;
+  $("machine-rows").innerHTML = (machines.others.length ? machines.others : [undefined]).map(machineRow).join("");
+  $("machine-error").textContent = "";
+  $("machine-self").value = machines.self;
+  $("machines-dialog").showModal();
+});
+$("machine-add").addEventListener("click", () => {
+  $("machine-rows").insertAdjacentHTML("beforeend", machineRow());
+  $("machine-rows").lastElementChild.querySelector("input").focus();
+});
+$("machine-rows").addEventListener("click", (ev) => {
+  const rm = ev.target.closest("[data-remove-machine]");
+  if (rm) rm.closest(".machine-row").remove();
+});
+$("machines-dialog").addEventListener("submit", (ev) => ev.preventDefault());
+$("machine-cancel").addEventListener("click", () => $("machines-dialog").close());
+$("machine-save").addEventListener("click", async () => {
+  const others = [...$("machine-rows").querySelectorAll(".machine-row")]
+    .map((r) => ({ name: r.querySelector('[name="name"]').value.trim(), url: r.querySelector('[name="url"]').value.trim() }))
+    .filter((m) => m.name || m.url)
+    // A bare host name is a web address too.
+    .map((m) => ({ ...m, url: m.url && !/^https?:\/\//i.test(m.url) ? "https://" + m.url : m.url }));
+  try {
+    machines = await api("/api/machines", { method: "POST", body: JSON.stringify({ self: $("machine-self").value, others }) });
+  } catch (e) {
+    $("machine-error").textContent = e.message;
+    return;
+  }
+  $("machines-dialog").close();
+  paintMachines();
+});
+
 /** One handler for the session parts: the conversation, its dock, the tabs, files, changes, details. */
 $("app").addEventListener("click", (ev) => {
   const t = ev.target;
@@ -3232,6 +3326,7 @@ else {
     // not ours
   }
   void loadInbox().then(() => noticed && answerFromNotice(selected, noticed));
+  void loadMachines();
   saveHash(); // without the choice: a reload must not answer again
   void initPush();
 }

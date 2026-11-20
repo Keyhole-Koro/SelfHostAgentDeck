@@ -18,6 +18,7 @@ notification when one needs you, start new ones, and stage exactly one session's
 - **The conversation.** Read back what you and the session said, a page at a time. Markdown is
   rendered, tool calls fold into one line per run, and images (yours, and screenshots its tools
   took) show as thumbnails.
+- **Your other computers** one tap away: each runs its own Agent Deck, and the page links them.
 - **A shell in each session's folder.** Run `git status` or the tests from the page, your phone
   too, and see what they print.
 - **Search.** Find what you or an agent said in any session of the last 30 days, running or
@@ -478,6 +479,17 @@ loginctl enable-linger    # optional: run them while you are logged out too
 `protocol: http2` in its config. Some networks block UDP; add that line there. Some block port
 7844 altogether, and on those the tunnel cannot connect. With `Restart=always` it keeps trying,
 and connects again once you are on another network.
+
+### Your other computers
+
+Sessions on another computer show on that computer's own Agent Deck. Set it up there the same
+way, with a host name of its own (`agents-laptop.example.com`), and pair your phone with it too.
+The computers never talk to each other.
+
+Then click the computer's name next to **Agent Deck** (its host name at first): **Add another
+computer** names this one and lists the others with their addresses. The name then opens a menu
+of them, one tap to switch, and the tab's title says which computer it shows. The list is kept on
+this computer, so your phone sees it too; from a phone, changing it needs the passkey check.
 
 ### Where it looks
 

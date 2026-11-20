@@ -184,6 +184,21 @@ describe("api: shell commands", () => {
   });
 });
 
+describe("api: your other computers", () => {
+  it("keeps this computer's name and links to the others' pages, checked", async () => {
+    const api = await serve();
+    const first = await api.get("/api/machines");
+    assert.ok(first.self, "named after its host at first");
+    assert.deepEqual(first.others, []);
+    const saved = await api.post("/api/machines", { self: " Desk ", others: [{ name: "Laptop", url: "https://laptop.example.com/#t=secret" }] });
+    assert.deepEqual(saved, { self: "Desk", others: [{ name: "Laptop", url: "https://laptop.example.com/" }] }, "no token from an address kept");
+    assert.deepEqual(await api.get("/api/machines"), saved);
+    await assert.rejects(api.post("/api/machines", { others: [{ name: "Bad", url: "javascript:alert(1)" }] }), /400/);
+    await assert.rejects(api.post("/api/machines", { others: [{ name: "", url: "https://x.example.com" }] }), /400/);
+    assert.deepEqual(await api.get("/api/machines"), saved, "a list turned down changes nothing");
+  });
+});
+
 describe("api: an app with notifications", () => {
   it("serves the manifest, the worker and the icons without the token", async () => {
     const api = await serve();
