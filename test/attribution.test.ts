@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, mkdirSync, realpathSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { beforeEach, describe, it } from "node:test";
+import { tempDir } from "./tmp.ts";
 
 // Run inside herdr or not, the processes these tests start must not inherit a real herdr pane.
 delete process.env["HERDR_PANE_ID"];
@@ -62,8 +62,8 @@ function owners(): Record<string, (string | null)[]> {
 }
 
 beforeEach(() => {
-  home = mkdtempSync(join(tmpdir(), "ab-home-"));
-  repo = mkdtempSync(join(tmpdir(), "ab-repo-"));
+  home = tempDir("ab-home-");
+  repo = tempDir("ab-repo-");
   git("init", "-q", "-b", "main");
   writeFileSync(join(repo, "shared.ts"), ["const a = 1;", "", "", "", "", "", "", "", "", "const z = 26;", ""].join("\n"));
   git("add", ".");
@@ -352,7 +352,7 @@ describe("inbox", () => {
 
 describe("projects", () => {
   it("groups a worktree's session with its repository, and reads its changes from the worktree", async () => {
-    const wt = join(mkdtempSync(join(tmpdir(), "ab-wt-")), "feature");
+    const wt = join(tempDir("ab-wt-"), "feature");
     git("worktree", "add", "-q", "-b", "feature", wt);
     writeFileSync(join(wt, "wt.md"), "from the worktree\n");
     const id = "in-worktree";

@@ -70,6 +70,15 @@ describe("markdown", () => {
     assert.equal(md("**Fix `a.ts`** now"), '<p><strong>Fix <code><a href="#" class="file" data-file="a.ts">a.ts</a></code></strong> now</p>');
   });
 
+  it("keeps code out of a link's address, where it would break the tag", () => {
+    const code = (p: string) => `<code><a href="#" class="file" data-file="${p}">${p}</a></code>`;
+    const web = (u: string) => `<a href="${u}" target="_blank" rel="noopener noreferrer">${u}</a>`;
+    assert.equal(md("<https://a.com/`a.ts`>"), `<p>&lt;${web("https://a.com/")}${code("a.ts")}&gt;</p>`);
+    assert.equal(md("[y](https://a.com/`src/a.ts`)"), `<p>[y](${web("https://a.com/")}${code("src/a.ts")})</p>`);
+    assert.equal(md("[y](./`a.ts`)"), `<p>[y](./${code("a.ts")})</p>`);
+    assert.equal(md("see `x` and \u00000\u0000 here"), "<p>see <code>x</code> and 0 here</p>", "a code span is shown once, where it was");
+  });
+
   it("leaves globs, snake_case and lone markers alone", () => {
     assert.equal(md("*.ts and *.js, snake_case_name, 2 * 3"), "<p>*.ts and *.js, snake_case_name, 2 * 3</p>");
     assert.equal(md("_just this_ word"), "<p><em>just this</em> word</p>");

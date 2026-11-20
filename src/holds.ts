@@ -52,10 +52,11 @@ export function readHolds(): Holds {
   }
 }
 
+/** Writes the holds atomically, readable by you only (as everything in the state folder). */
 function writeHolds(holds: Holds): void {
-  mkdirSync(stateDir(), { recursive: true });
+  mkdirSync(stateDir(), { recursive: true, mode: 0o700 });
   const tmp = `${holdsFile()}.${process.pid}.tmp`;
-  writeFileSync(tmp, JSON.stringify(holds, null, 2) + "\n");
+  writeFileSync(tmp, JSON.stringify(holds, null, 2) + "\n", { mode: 0o600 });
   renameSync(tmp, holdsFile());
 }
 

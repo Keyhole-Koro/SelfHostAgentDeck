@@ -1,12 +1,13 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { request } from "node:http";
 import { basename, join } from "node:path";
 import { inTerminal } from "./terminal.ts";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { summarize } from "../src/prs.ts";
 import { browser, decrypt, pushService } from "./push-browser.ts";
+import { tempDir } from "./tmp.ts";
 
 // Run inside herdr or not, the processes these tests start must not inherit a real herdr pane.
 delete process.env["HERDR_PANE_ID"];
@@ -26,8 +27,8 @@ function git(cwd: string, ...args: string[]): string {
 }
 
 beforeEach(() => {
-  home = mkdtempSync(join(tmpdir(), "adv-srv-home-"));
-  repo = realpathSync(mkdtempSync(join(tmpdir(), "adv-srv-repo-")));
+  home = tempDir("adv-srv-home-");
+  repo = realpathSync(tempDir("adv-srv-repo-"));
   env = { ...process.env, HOME: home, CLAUDE_CONFIG_DIR: "", CODEX_HOME: "", XDG_STATE_HOME: "", AGENT_DECK_STATE_DIR: "" };
   git(repo, "init", "-q", "-b", "main");
   writeFileSync(join(repo, "shared.ts"), ["const a = 1;", "", "", "", "", "", "", "", "", "const z = 26;", ""].join("\n"));
@@ -55,14 +56,15 @@ function transcript(id: string, rows: object[]): void {
 
 const edit = (file: string, old_string: string, new_string: string) => ({ type: "assistant", message: { content: [{ type: "tool_use", id: `e-${Math.random()}`, name: "Edit", input: { file_path: join(repo, file), old_string, new_string } }] } });
 
-async function serve(extraEnv: NodeJS.ProcessEnv = {}): Promise<{ get: (path: string) => Promise<any>; post: (path: string, body: object) => Promise<any>; send?: (path: string, init: RequestInit) => Promise<Response> }> {
+async function serve(extraEnv: NodeJS.ProcessEnv = {}): Promise<{ origin?: string; token?: string; get: (path: string) => Promise<any>; post: (path: string, body: object) => Promise<any>; send?: (path: string, init: RequestInit) => Promise<Response> }> {
   child = spawn(process.execPath, [CLI, "view", "--port", "0"], { cwd: repo, env: { ...env, ...extraEnv } });
   const url = await new Promise<string>((resolve, reject) => {
     child!.stdout!.on("data", (d: Buffer) => /http:\S+/.test(String(d)) && resolve(/http:\S+/.exec(String(d))![0]));
     child!.on("exit", (code) => reject(new Error(`server exited ${code}`)));
   });
   const { origin, hash } = new URL(url);
-  const headers = { "x-token": new URLSearchParams(hash.slice(1)).get("t")!, "content-type": "application/json" };
+  const token = new URLSearchParams(hash.slice(1)).get("t")!;
+  const headers = { "x-token": token, "content-type": "application/json" };
   const call = async (path: string, init: RequestInit = {}) => {
     const res = await fetch(origin + path, { ...init, headers });
     const body = await res.json();
@@ -70,10 +72,26 @@ async function serve(extraEnv: NodeJS.ProcessEnv = {}): Promise<{ get: (path: st
     return body;
   };
   return {
+    origin,
+    token,
     get: (path) => call(path),
     post: (path, body) => call(path, { method: "POST", body: JSON.stringify(body) }),
     send: (path, init) => fetch(origin + path, { ...init, headers: { ...headers, ...(init.headers as Record<string, string>) } }),
   };
+}
+
+/** A GET with the headers given, Host included, which fetch cannot set. */
+function raw(origin: string, path: string, headers: Record<string, string>): Promise<{ status: number; body: string }> {
+  return new Promise((resolve, reject) => {
+    const req = request(origin + path, { headers }, (res) => {
+      let body = "";
+      res.setEncoding("utf8");
+      res.on("data", (d: string) => (body += d));
+      res.on("end", () => resolve({ status: res.statusCode ?? 0, body }));
+    });
+    req.on("error", reject);
+    req.end();
+  });
 }
 
 async function eventually<T>(check: () => Promise<T | undefined>, ms = 8000): Promise<T> {
@@ -297,7 +315,7 @@ describe("api: later and done", () => {
 
 describe("api: cleanup", () => {
   it("lists idle sessions and the worktrees that can go, with the commands", async () => {
-    const wt = (name: string) => join(realpathSync(mkdtempSync(join(tmpdir(), "adv-wt-"))), name);
+    const wt = (name: string) => join(realpathSync(tempDir("adv-wt-")), name);
     const merged = wt("merged");
     const dirty = wt("dirty");
     const busy = wt("busy");
@@ -569,5 +587,33 @@ describe("api: the local token", () => {
       return new URL(url).hash;
     };
     assert.equal(await start(), await start());
+  });
+
+  it("answers its own host names only, and the API only with the very token", async () => {
+    const api = await serve();
+    const origin = api.origin!;
+    const token = api.token!;
+    const port = new URL(origin).port;
+    // Another site can point a name of its own at 127.0.0.1 (DNS rebinding): its page then reaches
+    // this port, with that name as the Host. Refused, token or not, the page and its assets too.
+    for (const host of ["evil.example", `evil.example:${port}`, `127.0.0.1.evil.example:${port}`]) {
+      for (const path of ["/", "/manifest.webmanifest", "/api/inbox"]) {
+        const res = await raw(origin, path, { host, "x-token": token });
+        assert.deepEqual([res.status, res.body], [403, "Forbidden host"], host + path);
+      }
+    }
+    for (const host of [`localhost:${port}`, `127.0.0.1:${port}`, "localhost"]) assert.equal((await raw(origin, "/api/inbox", { host, "x-token": token })).status, 200, host);
+    // No token, an empty one, one a character off, one too short or too long: refused.
+    const off = token.slice(0, -1) + (token.endsWith("0") ? "1" : "0");
+    for (const wrong of [undefined, "", off, token.slice(0, -1), token + "0"]) {
+      const res = await raw(origin, "/api/inbox", { host: `localhost:${port}`, ...(wrong !== undefined && { "x-token": wrong }) });
+      assert.equal(res.status, 403, `token ${JSON.stringify(wrong)}`);
+      assert.match(res.body, /access token/);
+    }
+    // The page and what makes it an app need none: the page takes the token from its URL.
+    const page = await raw(origin, "/", { host: `localhost:${port}` });
+    assert.equal(page.status, 200);
+    assert.match(page.body, /<title>Agent Deck<\/title>/);
+    assert.equal((await raw(origin, "/manifest.webmanifest", { host: `127.0.0.1:${port}` })).status, 200);
   });
 });

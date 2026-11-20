@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { repoInfo } from "./git.ts";
 import { stateDir } from "./holds.ts";
@@ -142,10 +142,12 @@ function artifact(args: string[]): Promise<string> {
 
 /** Writes the snapshot and publishes it; the same file always goes to the same URL. */
 export async function publishSnapshot(inbox: Inbox, opts: { prStatus?: Record<string, PrStatus> } = {}): Promise<{ url: string; created: boolean; file: string }> {
+  // Readable by you only, as everything in the state folder: it holds what your sessions said.
   const dir = join(stateDir(), "snapshot");
-  mkdirSync(dir, { recursive: true });
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
   const file = join(dir, "agent-inbox.html");
-  writeFileSync(file, snapshotHtml(inbox, opts));
+  writeFileSync(file, snapshotHtml(inbox, opts), { mode: 0o600 });
+  chmodSync(file, 0o600); // the mode above applies to a new file only; an older one was readable by all
   const out = await artifact(["publish", file, "--title", "Agent inbox", "--description", "The coding-agent sessions waiting on you, from agent-deck", "--json"]);
   let r: { url?: string; created?: boolean } = {};
   try {

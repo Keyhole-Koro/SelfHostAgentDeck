@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { inTerminal } from "./terminal.ts";
 import { after, before, describe, it } from "node:test";
+import { tempDir } from "./tmp.ts";
 
 // Run inside herdr or not, the processes these tests start must not inherit a real herdr pane.
 delete process.env["HERDR_PANE_ID"];
@@ -30,8 +30,8 @@ try {
 }
 
 describe("page", { skip: (!chromium && "no browser") || (process.platform !== "linux" && "reads /proc") }, () => {
-  const home = mkdtempSync(join(tmpdir(), "adv-ui-home-"));
-  const repo = realpathSync(mkdtempSync(join(tmpdir(), "adv-ui-repo-")));
+  const home = tempDir("adv-ui-home-");
+  const repo = realpathSync(tempDir("adv-ui-repo-"));
   const herdrLog = join(home, "herdr.log");
   const socket = join(home, "herdr.sock");
   const kids: ChildProcess[] = [];
@@ -311,7 +311,8 @@ esac
     await page.fill("#prompt", "Look at this");
     await page.click('[data-act="prompt"]');
     await until(() => herdrCalls().some((l) => l.includes("Look at this")) && herdrCalls().some((l) => /\.agent-deck\/uploads\/\d{8}-\d{6}-shot\.png/.test(l)) && herdrCalls().some((l) => /\.agent-deck\/uploads\/\d{8}-\d{6}-pasted-\d{6}\.png/.test(l)));
-    assert.equal(await page.locator("#dock .att").count(), 0, "sent with the prompt");
+    // herdr is called before the server answers the page: wait for the page to have the answer.
+    await until(async () => (await page.locator("#dock .att").count()) === 0); // sent with the prompt
     await page.click('[data-tab="changes"]');
     await page.waitForSelector(".comment-btn");
     await page.locator(".comment-btn").first().click();
@@ -343,7 +344,7 @@ esac
     await page.click('[data-act="ns-start"]');
     await until(() => herdrCalls().some((l) => /^agent start \S+ --kind claude --pane w9:p1 --timeout 60000 -- --session-id [0-9a-f-]{36} --model opus --effort high$/.test(l)));
     await until(() => herdrCalls().includes("agent prompt w9:p1 Add CSV export"));
-    assert.match(await page.locator("#ns-note").innerText(), /Started/);
+    await until(async () => /Started/.test(await page.locator("#ns-note").innerText())); // once the page has the answer
     await page.click("#new");
   });
 
@@ -519,7 +520,7 @@ esac
     assert.equal(await card.locator(".card-input").inputValue(), "hello from the deck\n", "Enter alone is a new line");
     await card.locator(".card-input").press("Control+Enter");
     await until(() => herdrCalls().includes("agent prompt w1:p3 hello from the deck"));
-    assert.equal(await card.locator(".card-input").inputValue(), "", "sent, and cleared");
+    await until(async () => (await card.locator(".card-input").inputValue()) === ""); // sent, and cleared once the page has the answer
     await shot("6-deck");
   });
 

@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { createHmac } from "node:crypto";
+import { mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { request } from "node:http";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, beforeEach, describe, it } from "node:test";
+import { tempDir } from "./tmp.ts";
 
 // Run inside herdr or not, the processes these tests start must not inherit a real herdr pane.
 delete process.env["HERDR_PANE_ID"];
@@ -82,6 +83,8 @@ let env: NodeJS.ProcessEnv;
 let server: ChildProcess;
 let port = 0;
 let origin = "";
+/** The page on this computer, with its token. */
+let localUrl = "";
 
 function cli(...args: string[]): string {
   return execFileSync(process.execPath, [CLI, ...args], { cwd: home, env, encoding: "utf8" });
@@ -141,7 +144,7 @@ async function signIn(passkey: Awaited<ReturnType<typeof softPasskey>>): Promise
 }
 
 before(async () => {
-  home = mkdtempSync(join(tmpdir(), "adv-remote-"));
+  home = tempDir("adv-remote-");
   state = join(home, "state");
   env = { ...process.env, HOME: home, CLAUDE_CONFIG_DIR: "", CODEX_HOME: "", XDG_STATE_HOME: "", AGENT_DECK_STATE_DIR: state, AGENT_DECK_PUSH_INSECURE: "1" };
   const sessions = join(home, ".claude", "sessions");
@@ -150,10 +153,12 @@ before(async () => {
   port = 47_000 + Math.floor(Math.random() * 2000);
   origin = `http://localhost:${port}`;
   server = spawn(process.execPath, [CLI, "inbox", "--view", "--port", "0", "--no-herdr", "--remote", origin, "--remote-port", String(port)], { cwd: home, env });
+  let out = "";
   await new Promise<void>((resolve, reject) => {
-    server.stdout!.on("data", (d: Buffer) => String(d).includes("Remote:") && resolve());
+    server.stdout!.on("data", (d: Buffer) => (out += String(d)).includes("Remote:") && resolve());
     server.on("exit", (code) => reject(new Error(`view exited ${code}`)));
   });
+  localUrl = /http:\/\/127\.0\.0\.1\S+/.exec(out)![0];
 });
 
 after(() => server?.kill());
@@ -206,6 +211,10 @@ describe("remote: pairing and signing in", () => {
     assert.equal(shell.json.confirm, true);
     const machines = await call("POST", "/api/machines", { body: { others: [{ name: "Fake", url: "https://phish.example.com" }] }, cookie: only, headers: page() });
     assert.equal(machines.status, 403, "nor can it change where the computer links point");
+    const subscription = { endpoint: "https://push.example.com/stolen", keys: { p256dh: "x", auth: "y" } };
+    const notifications = await call("POST", "/api/push/subscribe", { body: { subscription }, cookie: only, headers: page() });
+    assert.equal(notifications.status, 403, "nor have the notifications, with what they quote, sent somewhere else");
+    assert.equal(notifications.json.confirm, true);
     assert.equal((await call("POST", "/api/hold", { body: { key: "claude:s1", kind: "later", until: "1h" }, cookie: only, headers: page() })).status, 200, "putting off is not acting");
     const asked = await call("POST", "/auth/confirm/options", { cookie: only, headers: page() });
     assert.deepEqual(asked.json.allowCredentials.map((c: { id: string }) => c.id), [passkey.id], "only this device's passkey");
@@ -289,5 +298,65 @@ describe("remote: closed doors", () => {
     const r = await call("POST", "/api/remote/pair", { body: {}, cookie: session, headers: page() });
     assert.equal(r.status, 403);
     assert.match(r.json.error, /from your computer/);
+  });
+
+  it("takes a signed cookie only for what it was made for: a session or a passkey request is no passkey check", async () => {
+    const passkey = await softPasskey();
+    const all = await pairDevice(passkey, "Fourth phone");
+    const value = (c: string) => c.slice(c.indexOf("=") + 1);
+    const own = all.split("; ").find((c) => c.startsWith("agent_deck_session="))!;
+    const fresh = all.split("; ").find((c) => c.startsWith("agent_deck_confirmed="))!;
+    const act = (cookie: string) => call("POST", "/api/herdr/prompt", { body: { key: "claude:s1", text: "hi" }, cookie, headers: page() });
+    assert.match((await act(all)).json.error, /herdr pane/, "the check made when pairing lets it act");
+
+    const replayed = await act(`${own}; agent_deck_confirmed=${value(own)}`);
+    assert.equal(replayed.status, 403, "the session cookie, replayed as the passkey check");
+    assert.equal(replayed.json.confirm, true);
+    const shell = await call("POST", "/api/command", { body: { key: "claude:s1", command: "touch pwned" }, cookie: `${own}; agent_deck_confirmed=${value(own)}`, headers: page() });
+    assert.equal(shell.status, 403, "no shell command with it either");
+
+    const asked = await call("POST", "/auth/confirm/options", { cookie: own, headers: page() });
+    const request = asked.cookies.find((c) => c.startsWith("agent_deck_webauthn="))!;
+    const posing = await act(`${own}; agent_deck_confirmed=${value(request)}`);
+    assert.equal(posing.status, 403, "a passkey request is not a passkey check");
+    assert.equal(posing.json.confirm, true);
+    assert.equal((await call("GET", "/api/inbox", { cookie: `agent_deck_session=${value(request)}`, headers: page() })).status, 401, "nor a session");
+    assert.equal((await call("GET", "/api/inbox", { cookie: `agent_deck_session=${value(fresh)}`, headers: page() })).status, 401, "nor is the passkey check");
+
+    // A session signed before cookies said what they are for: still signed in, but it cannot act.
+    const secret = Buffer.from(readFileSync(join(state, "remote", "secret"), "utf8").trim(), "hex");
+    const body = Buffer.from(JSON.stringify({ pk: passkey.id, exp: Math.floor(Date.now() / 1000) + 3600 })).toString("base64url");
+    const legacy = `agent_deck_session=${body}.${createHmac("sha256", secret).update(body).digest("base64url")}`;
+    assert.equal((await call("GET", "/api/inbox", { cookie: legacy, headers: page() })).status, 200, "an older session cookie still signs in");
+    const old = await act(`${legacy}; agent_deck_confirmed=${value(legacy)}`);
+    assert.equal(old.status, 403, "but does not stand in for the passkey check");
+    assert.equal(old.json.confirm, true);
+  });
+
+  it("removes another device only within minutes of a passkey check, as any action", async () => {
+    const passkey = await softPasskey();
+    const own = (await pairDevice(passkey, "Fifth phone")).split("; ").find((c) => c.startsWith("agent_deck_session="))!;
+    const spare = await softPasskey();
+    await pairDevice(spare, "Spare tablet");
+    const devices = async () => (await call("GET", "/api/remote", { cookie: own, headers: page() })).json.devices.map((d: { label: string }) => d.label);
+    const blocked = await call("POST", "/api/remote/revoke", { body: { id: spare.id }, cookie: own, headers: page() });
+    assert.equal(blocked.status, 403, "the session cookie alone cannot remove a device");
+    assert.equal(blocked.json.confirm, true);
+    assert.ok((await devices()).includes("Spare tablet"));
+    const asked = await call("POST", "/auth/confirm/options", { cookie: own, headers: page() });
+    const ok = await call("POST", "/auth/confirm/verify", { body: { response: await passkey.authenticate(asked.json, origin) }, cookie: jar([...asked.cookies, own]), headers: page() });
+    assert.equal(ok.status, 200, ok.body);
+    const removed = await call("POST", "/api/remote/revoke", { body: { id: spare.id }, cookie: jar([own, ...ok.cookies]), headers: page() });
+    assert.equal(removed.status, 200, removed.body);
+    assert.equal(removed.json.removed, "Spare tablet");
+    assert.ok(!(await devices()).includes("Spare tablet"));
+
+    // The page on this computer removes devices as before, with its token and no passkey.
+    const laptop = await softPasskey();
+    await pairDevice(laptop, "Old laptop");
+    const { origin: local, hash } = new URL(localUrl);
+    const res = await fetch(`${local}/api/remote/revoke`, { method: "POST", headers: { "x-token": new URLSearchParams(hash.slice(1)).get("t")!, "content-type": "application/json" }, body: JSON.stringify({ id: laptop.id }) });
+    assert.equal(res.status, 200);
+    assert.deepEqual(await res.json(), { removed: "Old laptop" });
   });
 });

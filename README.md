@@ -429,8 +429,9 @@ How it is kept to you:
   made on this computer only (`agent-deck remote pair`, or **Remote → Add a phone** on the local
   page). A signed-in device cannot add others, and when one is added, the other devices get a
   notification.
-- **Looking is not acting.** Sending prompts or keys, staging, starting a session, sending files
-  or running a shell command needs the device's own passkey checked in the last five minutes; the page asks for it.
+- **Looking is not acting.** Sending prompts or keys, staging, starting a session, sending files,
+  running a shell command, removing a device or turning notifications on needs the device's own passkey checked in the last
+  five minutes; the page asks for it.
   Someone who stole a session cookie can look, but not act.
 - The session is a signed, `HttpOnly`, `Secure`, `SameSite=Strict` cookie that names its
   passkey. Removing the device (`agent-deck remote revoke`, or **Remote**) ends its sessions and

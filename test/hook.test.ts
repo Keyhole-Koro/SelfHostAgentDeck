@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { beforeEach, describe, it } from "node:test";
+import { tempDir } from "./tmp.ts";
 
 /** The hook as the agents run it: JSON on stdin, a note on stdout only when there is one. */
 
@@ -13,8 +13,8 @@ let repo: string;
 let env: NodeJS.ProcessEnv;
 
 beforeEach(() => {
-  home = mkdtempSync(join(tmpdir(), "adv-hook-home-"));
-  repo = mkdtempSync(join(tmpdir(), "adv-hook-repo-"));
+  home = tempDir("adv-hook-home-");
+  repo = tempDir("adv-hook-repo-");
   env = { ...process.env, HOME: home, CLAUDE_CONFIG_DIR: "", CODEX_HOME: "" };
   const g = (...a: string[]) => execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", ...a], { cwd: repo });
   g("init", "-q", "-b", "main");

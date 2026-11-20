@@ -1,4 +1,4 @@
-import { randomBytes } from "node:crypto";
+import { randomBytes, timingSafeEqual } from "node:crypto";
 import { mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { Worker } from "node:worker_threads";
@@ -327,6 +327,15 @@ function localToken(): string {
   return t;
 }
 
+/** Whether a request carries the local page's token: compared in constant time, so how long a wrong one takes tells nothing. */
+function carriesToken(req: IncomingMessage, token: string): boolean {
+  const given = req.headers["x-token"];
+  if (typeof given !== "string") return false;
+  const got = Buffer.from(given);
+  const want = Buffer.from(token);
+  return got.length === want.length && timingSafeEqual(got, want);
+}
+
 function listen(server: Server, port: number): Promise<number> {
   return new Promise((resolve, reject) => {
     server.once("error", reject);
@@ -468,14 +477,14 @@ export async function serve(opts: ServeOptions): Promise<Served> {
 
   /**
    * The API, for the local page and for signed-in devices (`device` set: remote, and logged). A
-   * device acts (prompts, keys, staging, starting, uploading, shell commands, the computer list) only within a few minutes of a
-   * passkey check: a stolen cookie alone can look, not act.
+   * device acts (prompts, keys, staging, starting, uploading, shell commands, the computer list, removing a device, turning
+   * notifications on) only within a few minutes of a passkey check: a stolen cookie alone can look, not act.
    */
   const api = async (req: IncomingMessage, res: ServerResponse, url: URL, device?: Passkey, fresh = false): Promise<void> => {
     const log = (action: string, target?: string, detail?: string) => {
       if (device) audit({ device: device.label, action, ...(target && { target }), ...(detail && { detail }) });
     };
-    const acting = req.method === "POST" && /^\/api\/(herdr\/(prompt|keys|choose)|stage|start|upload|move|command|machines)$/.test(url.pathname);
+    const acting = req.method === "POST" && /^\/api\/(herdr\/(prompt|keys|choose)|stage|start|upload|move|command|machines|remote\/revoke|push\/subscribe)$/.test(url.pathname);
     if (device && acting && !fresh) return json(res, 403, { error: "Confirm it is you with this device's passkey.", confirm: true });
     if (req.method === "GET" && url.pathname === "/api/inbox") {
       const inbox = currentInbox();
@@ -745,7 +754,7 @@ export async function serve(opts: ServeOptions): Promise<Served> {
       }
       const asset = req.method === "GET" ? appAsset(url.pathname) : undefined;
       if (asset) return send(res, 200, asset.type, asset.body);
-      if (req.headers["x-token"] !== token) return json(res, 403, { error: "Open the URL agent-deck view printed (it carries the access token)." });
+      if (!carriesToken(req, token)) return json(res, 403, { error: "Open the URL agent-deck view printed (it carries the access token)." });
       return await api(req, res, url);
     } catch (e) {
       return json(res, e instanceof FileError ? e.status : 400, { error: (e as Error).message });

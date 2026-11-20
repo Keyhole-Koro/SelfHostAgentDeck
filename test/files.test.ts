@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it } from "node:test";
+import { tempDir } from "./tmp.ts";
 
 // The home folder decides which roots are refused: keep it a made-up one.
-const home = realpathSync(mkdtempSync(join(tmpdir(), "adv-files-home-")));
+const home = realpathSync(tempDir("adv-files-home-"));
 process.env.HOME = home;
 const { FileError, filesRoot, image, look, secret } = await import("../src/files.ts");
 
@@ -81,6 +81,8 @@ describe("files a session's page may open", () => {
 
   it("knows the usual secret files", () => {
     for (const n of [".env", ".env.production", ".dev.vars", "server.pem", "tls.key", "id_ed25519", "id_rsa.pub", ".npmrc", "credentials.json", ".credentials.json", "service-account-prod.json", "secrets.yaml", "prod.tfvars", "terraform.tfstate"]) assert.equal(secret(n), true, n);
+    for (const n of [".envrc", ".envrc.local", ".git-credentials", "AuthKey_ABC123DEFG.p8", "deploy.ppk", "prod.tfvars.json", ".terraformrc", "terraform.rc", "client_secret.json", "client_secret_123-abc.apps.googleusercontent.com.json", "client_secrets.json", "application_default_credentials.json", "my-app-firebase-adminsdk-ab12c-0123456789.json"]) assert.equal(secret(n), true, n);
     for (const n of [".env.example", "env.ts", "keyboard.ts", "credential.ts", "secret-santa.md", "README.md"]) assert.equal(secret(n), false, n);
+    for (const n of [".envrc.example", "envrc.md", "git-credential.ts", "main.tf", "variables.tf", ".terraform.lock.hcl", "client.json", "firebase.json", ".firebaserc", "default_credentials.md"]) assert.equal(secret(n), false, n);
   });
 });
